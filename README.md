@@ -13,7 +13,7 @@ At this time the implementation has a few limitations compared to the full poten
 * In light of the above restrictions, pipelining the evaluation of the final garbled circuit is not implemented, but if anyone wants to extend the code to handle this (or in any other way) you are very welcome to.
 
 ##Installation
-The code has been tested to work on MAC OSX 10.11 (El Capitan), Amazon Linux 2016.03, Ubuntu 14.04, and Ubuntu 16.04.
+The code has been tested to work on MAC OSX 10.11 (El Capitan), macOS 10.12 (Sierra), Amazon Linux 2016.03, Ubuntu 14.04, and Ubuntu 16.04.
 
 ###Requirements
 * C/C++ compiler with C++14 support. The code has been successfully built with GCC 5.3.1, GCC 6.1 and CLANG 3.8.
