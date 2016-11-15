@@ -1,0 +1,54 @@
+APRICOT: Advanced Protocols for Real-world Implementation
+         of Computational Oblivious Transfers
+
+This software is copyrighted
+
+Copyright: (c) University of Bristol 2016
+All rights reserved.
+
+This license covers the 'the Software' for OT Extension
+(called APRICOT) developed by Marcel Keller, Peter Scholl
+and Nigel Smart and owned by the University of Bristol.
+
+1) The University of Bristol grants, and you hereby accept, a
+non-exclusive, royalty-free license to use the Software in accordance
+with the terms of this agreement.
+
+2) If you use the Software for any commercial purpose you agree,
+to provide non-confidential information about how you are using
+the Software, to the software authors. You shall grant permission
+for the University of Bristol to use this material for reporting
+the impact of the original University of Bristol’s work.
+
+3) You acknowledge that the Software is the result of academic research
+and is supplied "AS IS", without obligation by the authors or the
+University of Bristol to provide accompanying services or support.
+
+4) You agree to load and use the Software entirely at your own risk and
+in no event will the University of Bristol be liable for any loss or
+damage of any kind. You hereby agree to defend, indemnify and hold
+harmless the University of Bristol against any liability or claim
+arising from your use of the Software.
+
+5) The express terms of this agreement are in lieu of all warranties,
+conditions, undertakings, terms and obligations implied by statute,
+common law, trade usage, course of dealing or otherwise all of which are
+hereby excluded to the fullest extent permitted by law. The Software is
+provided, and accepted by you, WITHOUT ANY WARRANTY OF MERCHANTAITY OR
+FITNESS FOR PARTICULAR PURPOSE OR ANY OTHER WARRANTY, EXPRESSED OR
+IMPLIED.  Bristol in particular gives and makes no condition, other
+term, or provision or representation that any use of the Software will
+not infringe the rights of any person. No warranty is given that the
+information will be free from error or viruses.
+
+6) You agree to acknowledge use of the Software in any reports or
+publications of results obtained with the Software
+
+7) Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice
+and this list of conditions and disclaimers.
+
+2. Redistributions in binary form must reproduce the above copyright
+notice and this list of conditions and disclaimers.

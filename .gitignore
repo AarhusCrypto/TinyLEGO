@@ -1,0 +1,13 @@
+xcode
+build
+timing_scripts/local_tmp
+*.DS_Store
+*.out
+*.o
+*.a
+CMakeFiles
+CMakeScripts
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+README.html
