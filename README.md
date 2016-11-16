@@ -10,6 +10,7 @@ The implementation was written with the purpose of exploring the practical effic
 At this time the implementation has a few limitations compared to the full potential of the general protocol:
 * Due to simplicity the preprocessing, circuit building and evaluation phases can only be invoked once for the lifetime of the program, but we stress this is not due to a restriction from the TinyLEGO protocol. This has the effect that the caller needs to know a priori how many AND gates the final functionality requires as he cannot later produce more with the current codebase.
 * The implementation uses no disk I/O whatsoever and the complexity of the desired secure function (# AND gates) is therefore bounded by the amount of RAM on the current machine.
+* The extraction of a dishonest constructor's input using input buckets has not currently been implemented. It should be straightforward to add, but as the main purpose of this implementation was measuring performance, it did not make it into the release.
 * In light of the above restrictions, pipelining the evaluation of the final garbled circuit is not implemented, but if anyone wants to extend the code to handle this (or in any other way) you are very welcome to.
 
 ##Installation
