@@ -207,6 +207,8 @@ int main(int argc, const char* argv[]) {
   params.chan.Send(dummy_val, network_dummy_size);
   params.chan.bytes_received_vec[params.chan.received_pointer] = 0;
   params.chan.bytes_sent_vec[params.chan.sent_pointer] = 0;
+  tiny_eval.ot_rec.net.m_vSocket->m_nSndCount = 0;
+  tiny_eval.ot_rec.net.m_vSocket->m_nRcvCount = 0;
   delete[] dummy_val;
   delete[] dummy_val_rec;
   free(dummy_val_rec2);
@@ -219,10 +221,21 @@ int main(int argc, const char* argv[]) {
   mr_end_threading();
   auto setup_end = GET_TIME();
 
+  uint64_t setup_sent = params.chan.GetTotalBytesSent() + tiny_eval.ot_rec.net.m_vSocket->getSndCnt();
+  for (std::unique_ptr<Params>& thread_params : tiny_eval.thread_params_vec) {
+    setup_sent += thread_params->chan.GetTotalBytesSent();
+  }
+
   //Run Preprocessing phase
   auto preprocess_begin = GET_TIME();
   tiny_eval.Preprocess();
   auto preprocess_end = GET_TIME();
+
+  uint64_t preprocess_sent = params.chan.GetTotalBytesSent() + tiny_eval.ot_rec.net.m_vSocket->getSndCnt();
+  for (std::unique_ptr<Params>& thread_params : tiny_eval.thread_params_vec) {
+    preprocess_sent += thread_params->chan.GetTotalBytesSent();
+  }
+  preprocess_sent -= setup_sent;
 
   //Preprocessing creates pre_num_execs sub-param objects. If more are needed in the offline and online phases we create them here.
   int extra_execs = num_params - params.num_execs;
@@ -248,6 +261,12 @@ int main(int argc, const char* argv[]) {
   tiny_eval.Offline(circuits, top_num_execs);
   auto offline_end = GET_TIME();
 
+  uint64_t offline_sent = params.chan.GetTotalBytesSent() + tiny_eval.ot_rec.net.m_vSocket->getSndCnt();
+  for (std::unique_ptr<Params>& thread_params : tiny_eval.thread_params_vec) {
+    offline_sent += thread_params->chan.GetTotalBytesSent();
+  }
+  offline_sent -= (setup_sent + preprocess_sent);
+
 
   // If we are doing single evaluation then we have slightly better performance with a single thread running in the thread pool.
   int eval_num_execs = std::min((int)circuits.size(), online_num_execs);
@@ -265,6 +284,12 @@ int main(int argc, const char* argv[]) {
   auto online_begin = GET_TIME();
   tiny_eval.Online(circuits, eval_inputs, outputs_raw, eval_num_execs);
   auto online_end = GET_TIME();
+
+  uint64_t online_sent = params.chan.GetTotalBytesSent() + tiny_eval.ot_rec.net.m_vSocket->getSndCnt();
+  for (std::unique_ptr<Params>& thread_params : tiny_eval.thread_params_vec) {
+    online_sent += thread_params->chan.GetTotalBytesSent();
+  }
+  online_sent -= (setup_sent + preprocess_sent + offline_sent);
 
   //Check for correctness
   bool all_success = true;
@@ -289,10 +314,10 @@ int main(int argc, const char* argv[]) {
   if (!print_special_format) {
     std::cout << "===== Eval timings for " << num_iters << " x " << exec_name << "(" << (num_iters * circuit.num_and_gates) << ") with " << pre_num_execs << " preprocessing execs, " << top_num_execs << " offline execs and " << eval_num_execs << " online execs =====" << std::endl;
 
-    std::cout << "Setup ms: " << (double) setup_time_nano / num_iters / 1000000 << std::endl;
-    std::cout << "Preprocess ms: " << (double) preprocess_time_nano / num_iters / 1000000 << std::endl;
-    std::cout << "Offline ms: " << (double) offline_time_nano / num_iters / 1000000 << std::endl;
-    std::cout << "Online ms: " << (double) online_time_nano / num_iters / 1000000 << std::endl;
+    std::cout << "Setup ms: " << (double) setup_time_nano / num_iters / 1000000 << ", data sent: " << (double) setup_sent / 1000 << " (" << (double) setup_sent / num_iters / 1000 << ")" << " kB" << std::endl;
+  std::cout << "Preprocess ms: " << (double) preprocess_time_nano / num_iters / 1000000 << ", data sent: " << (double) preprocess_sent / 1000 << " (" << (double) preprocess_sent / num_iters / 1000 << ")" << " kB" << std::endl;
+  std::cout << "Offline ms: " << (double) offline_time_nano / num_iters / 1000000 << ", data sent: " << (double) offline_sent / 1000 << " (" << (double) offline_sent / num_iters / 1000 << ")" << " kB" << std::endl;
+  std::cout << "Online ms: " << (double) online_time_nano / num_iters / 1000000 << ", data sent: " << (double) online_sent / 1000 << " (" << (double) online_sent / num_iters / 1000 << ")" << " kB" << std::endl;
   } else {
     //Used for formatting output for paper
     std::cout << (double) setup_time_nano / num_iters / 1000000 << " " << (double) preprocess_time_nano / num_iters / 1000000 << " " << (double) offline_time_nano / num_iters / 1000000 << " " << (double) online_time_nano / num_iters / 1000000 << std::endl;

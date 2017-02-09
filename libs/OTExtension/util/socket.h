@@ -247,8 +247,6 @@ public:
 		return send(m_hSock, (char*) pBuf, nLen, nFlags);
 	}
 
-private:
-
 	SOCKET m_hSock;
 	uint64_t m_nSndCount, m_nRcvCount;
 };
