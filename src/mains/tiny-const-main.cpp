@@ -75,6 +75,15 @@ int main(int argc, const char* argv[]) {
     "-p"
   );
 
+  opt.add(
+    default_circuit_file.c_str(), // Default.
+    0, // Required?
+    1, // Number of args expected.
+    0, // Delimiter if expecting multiple args.
+    "circuit file", // Help description.
+    "-f"
+  );
+
   //Attempt to parse input
   opt.parse(argc, argv);
 
@@ -94,14 +103,15 @@ int main(int argc, const char* argv[]) {
   //Copy inputs into the right variables
   int num_iters, pre_num_execs, offline_num_execs, online_num_execs, optimize_online, port;
   std::vector<int> num_execs;
-  std::string circuit_name, ip_address, exec_name;
+  std::string circuit_name, circuit_file_name, ip_address;
   Circuit circuit;
+
   FILE* fileptr;
   uint8_t* input_buffer;
   long filelen;
-
   opt.get("-n")->getInt(num_iters);
   opt.get("-c")->getString(circuit_name);
+  opt.get("-f")->getString(circuit_file_name);
 
   opt.get("-e")->getInts(num_execs);
   pre_num_execs = num_execs[0];
@@ -112,42 +122,53 @@ int main(int argc, const char* argv[]) {
   opt.get("-ip")->getString(ip_address);
   opt.get("-p")->getInt(port);
 
-  //Set the circuit variables according to circuit_name
-  if (circuit_name.find("aes") != std::string::npos) {
-    exec_name = "AES";
-    circuit = read_text_circuit("test/data/AES-non-expanded.txt");
-    fileptr = fopen("test/data/aes_input_0.bin", "rb");
-  } else if (circuit_name.find("sha-256") != std::string::npos) {
-    exec_name = "SHA-256";
-    circuit = read_text_circuit("test/data/sha-256.txt");
-    fileptr = fopen("test/data/sha256_input_0.bin", "rb");
-  } else if (circuit_name.find("sha-1") != std::string::npos) {
-    exec_name = "SHA-1";
-    circuit = read_text_circuit("test/data/sha-1.txt");
-    fileptr = fopen("test/data/sha1_input_0.bin", "rb");
-  } else if (circuit_name.find("cbc") != std::string::npos) {
-    exec_name = "AES-CBC-MAC";
-    circuit = read_text_circuit("test/data/aescbcmac16.txt");
-    fileptr = fopen("test/data/cbc_input_0.bin", "rb");
-  } else {
-    std::cout << "No circuit matching: " << exec_name << ". Terminating" << std::endl;
+  //Read the file_name_given
+  if (!circuit_name.empty()) {
+    if (!circuit_file_name.empty()) {
+      std::cout << "Cannot both have -f and -c parameter set!" << std::endl;
+      return 1;
+    } else if (circuit_name.find("aes") != std::string::npos) {
+      circuit_file_name = "test/data/AES-non-expanded.txt";
+      fileptr = fopen("test/data/aes_input_0.bin", "rb");
+    } else if (circuit_name.find("sha-256") != std::string::npos) {
+      circuit_file_name = "test/data/sha-256.txt";
+      fileptr = fopen("test/data/sha256_input_0.bin", "rb");
+    } else if (circuit_name.find("sha-1") != std::string::npos) {
+      circuit_file_name = "test/data/sha-1.txt";
+      fileptr = fopen("test/data/sha1_input_0.bin", "rb");
+    } else if (circuit_name.find("cbc") != std::string::npos) {
+      circuit_file_name = "test/data/aescbcmac16.txt";
+      fileptr = fopen("test/data/cbc_input_0.bin", "rb");
+    } else {
+
+      std::cout << "No circuit matching: " << circuit_name << ". Terminating" << std::endl;
+      return 1;
+    }
+
+    //Read input from file to input_buffer and then set it to const_input
+    fseek(fileptr, 0, SEEK_END);
+    filelen = ftell(fileptr);
+    rewind(fileptr);
+    input_buffer = new uint8_t[(filelen + 1)];
+    fread(input_buffer, filelen, 1, fileptr);
+  }
+
+  if (circuit_file_name.empty()) {
+    std::cout << "No circuit given" << std::endl;
     return 1;
   }
 
-  //Read input from file to input_buffer and then set it to const_input
-  fseek(fileptr, 0, SEEK_END);
-  filelen = ftell(fileptr);
-  rewind(fileptr);
-  input_buffer = new uint8_t[(filelen + 1)];
-  fread(input_buffer, filelen, 1, fileptr);
+  circuit = read_text_circuit(circuit_file_name.c_str());
 
-  std::unique_ptr<uint8_t[]> const_input(std::make_unique<uint8_t[]>(BITS_TO_BYTES(circuit.num_const_inp_wires)));
-  //Read input the "right" way
-  for (int i = 0; i < circuit.num_const_inp_wires; ++i) {
-    if (GetBitReversed(i, input_buffer)) {
-      SetBit(i, 1, const_input.get());
-    } else {
-      SetBit(i, 0, const_input.get());
+  std::unique_ptr<uint8_t[]> const_input(std::make_unique<uint8_t[]>(BITS_TO_BYTES(circuit.num_const_inp_wires))); //run on dummy 0 input as default
+  
+  //if predetermined case read actual input
+  if (!circuit_name.empty()) {
+    //Read input the "right" way
+    for (int i = 0; i < circuit.num_const_inp_wires; ++i) {
+      if (GetBitReversed(i, input_buffer)) {
+        SetBit(i, 1, const_input.get());
+      }
     }
   }
 
@@ -201,7 +222,7 @@ int main(int argc, const char* argv[]) {
   for (std::unique_ptr<Params>& thread_params : tiny_const.thread_params_vec) {
     setup_sent += thread_params->chan.GetTotalBytesSent();
   }
-  
+
   //Run Preprocessing phase
   auto preprocess_begin = GET_TIME();
   tiny_const.Preprocess();
@@ -267,7 +288,7 @@ int main(int argc, const char* argv[]) {
   uint64_t offline_time_nano = std::chrono::duration_cast<std::chrono::nanoseconds>(offline_end - offline_begin).count();
   uint64_t online_time_nano = std::chrono::duration_cast<std::chrono::nanoseconds>(online_end - online_begin).count();
 
-  std::cout << "===== Const timings for " << num_iters << " x " << exec_name << "(" << (num_iters * circuit.num_and_gates) << ") with " << pre_num_execs << " preprocessing execs, " << top_num_execs << " offline execs and " << eval_num_execs << " online execs =====" << std::endl;
+  std::cout << "===== Const timings for " << num_iters << " x " << circuit_file_name << "(" << (num_iters * circuit.num_and_gates) << ") with " << pre_num_execs << " preprocessing execs, " << top_num_execs << " offline execs and " << eval_num_execs << " online execs =====" << std::endl;
 
   std::cout << "Setup ms: " << (double) setup_time_nano / num_iters / 1000000 << ", data sent: " << (double) setup_sent / 1000 << " (" << (double) setup_sent / num_iters / 1000 << ")" << " kB" << std::endl;
   std::cout << "Preprocess ms: " << (double) preprocess_time_nano / num_iters / 1000000 << ", data sent: " << (double) preprocess_sent / 1000 << " (" << (double) preprocess_sent / num_iters / 1000 << ")" << " kB" << std::endl;

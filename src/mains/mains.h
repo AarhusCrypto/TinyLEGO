@@ -10,7 +10,8 @@ static const uint32_t commit_dummy_output = 128;
 
 //Hardcoded default values
 static std::string default_num_iters("10");
-static std::string default_circuit_name("aes");
+static std::string default_circuit_name("");
+static std::string default_circuit_file("");
 static std::string default_execs("1, 1, 1");
 static std::string default_optimize_online("0");
 static std::string default_ip_address("localhost");
