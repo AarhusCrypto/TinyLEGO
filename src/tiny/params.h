@@ -3,8 +3,8 @@
 
 #include "OTExtension/util/crypto/crypto.h"
 #include "prg/random.h"
-#include "util/network.h"
-#include "util/channel.h"
+#include "tiny-util/network.h"
+#include "tiny-util/channel.h"
 
 class Params {
 public:

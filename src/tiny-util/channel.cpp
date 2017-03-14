@@ -1,4 +1,4 @@
-#include "util/channel.h"
+#include "tiny-util/channel.h"
 
 Channel::Channel(std::string ip_address, uint16_t port_push, uint16_t port_pull, uint8_t net_role, zmq::context_t& context) : receive_socket(context, ZMQ_PULL), send_socket(context, ZMQ_PUSH), bytes_received_vec(1), received_pointer(0), bytes_sent_vec(1), sent_pointer(0), net_role(net_role) {
   if (net_role) { //client

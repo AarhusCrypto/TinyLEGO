@@ -1,7 +1,7 @@
 #ifndef TINY_UTIL_CHANNEL_H_
 #define TINY_UTIL_CHANNEL_H_
 
-#include "util/util.h"
+#include "tiny-util/util.h"
 
 #include "zeromq/include/zmq.hpp"
 

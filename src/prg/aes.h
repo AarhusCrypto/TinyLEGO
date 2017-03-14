@@ -3,7 +3,7 @@
 #ifndef __AES_H
 #define __AES_H
 
-#include "util/typedefs.h"
+#include "tiny-util/typedefs.h"
 
 #define AES_BLK_SIZE 16
 

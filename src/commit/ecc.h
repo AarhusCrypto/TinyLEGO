@@ -1,7 +1,7 @@
 #ifndef TINY_COMMIT_ECC_H_
 #define TINY_COMMIT_ECC_H_
 
-#include "util/util.h"
+#include "tiny-util/util.h"
 extern "C" {
   #include "commit/bch.h"
 }

@@ -1,7 +1,7 @@
 #include "test.h"
 
 #include "circuit/circuit.h"
-#include "util/util.h"
+#include "tiny-util/util.h"
 
 TEST(GetCircuit, Parse) {
   Circuit c = read_text_circuit("test/data/AES-non-expanded.txt");

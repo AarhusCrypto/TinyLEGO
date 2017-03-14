@@ -1,8 +1,8 @@
 #ifndef TINY_UTIL_UTIL_H_
 #define TINY_UTIL_UTIL_H_
 
-#include "util/typedefs.h"
-#include "util/global-constants.h"
+#include "tiny-util/typedefs.h"
+#include "tiny-util/global-constants.h"
 
 #include "prg/random.h"
 

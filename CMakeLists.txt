@@ -23,7 +23,6 @@ set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -DRELEASE")
 
 #Find libraries
 
-FIND_PACKAGE(Threads REQUIRED)
 set(PTHREAD_COMP_FLAG -pthread)
 FIND_PACKAGE(OpenSSL REQUIRED)
 FIND_PACKAGE(FindGMP HINTS cmake/)
@@ -33,20 +32,31 @@ FIND_PACKAGE(FindZMQ HINTS cmake/)
 set(ENV{MALLOC_PERMIT_INSANE_REQUESTS} "SOME VALUE")
 
 #set constant compiler flags
-set(CMAKE_CXX_FLAGS "-march=native -std=c++14 ${PTHREAD_COMP_FLAG}")
 set(CMAKE_C_FLAGS "-march=native ${PTHREAD_COMP_FLAG}")
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -std=c++14")
 
 #Include headers
-include_directories(${OPENSSL_INCLUDE_DIR})
 include_directories(${GMP_INCLUDE_DIR})
+
+#Build sublibraries
+add_subdirectory(libs/SplitCommit)
+
+#Include headers
+include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/libOTe)
+include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/src/)
+include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/)
+
+include_directories(${OPENSSL_INCLUDE_DIR})
 include_directories(${ZMQ_INCLUDE_DIRS})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/libs)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/test)
 
+
+
 #Build sublibraries
 ##################################MIRACL#######################################
-set(MIRACL_SRCS
+set(MIRACL_OTX_SRCS
  ${CMAKE_CURRENT_SOURCE_DIR}/libs/Miracl/mrcore.c
  ${CMAKE_CURRENT_SOURCE_DIR}/libs/Miracl/mrarth0.c
  ${CMAKE_CURRENT_SOURCE_DIR}/libs/Miracl/mrarth1.c 
@@ -104,21 +114,15 @@ set(MIRACL_SRCS
  ${CMAKE_CURRENT_SOURCE_DIR}/libs/Miracl/flash.cpp 
  ${CMAKE_CURRENT_SOURCE_DIR}/libs/Miracl/polymod.cpp 
  ${CMAKE_CURRENT_SOURCE_DIR}/libs/Miracl/poly.cpp)
-add_library(MIRACL ${MIRACL_SRCS})
-##################################MIRACL#######################################
-
-
-###################################GTEST#######################################
-add_subdirectory(libs/googletest)
-###################################GTEST#######################################
-
+add_library(MIRACL_OTX ${MIRACL_OTX_SRCS})
+##################################MIRACL_OTX#######################################
 
 #################################ALSZ OTX#####################################
 set(OTX_UTIL_SRCS libs/OTExtension/util/cbitvector.cpp libs/OTExtension/util/parse_options.cpp)
 add_library(OTX_UTIL ${OTX_UTIL_SRCS})
 set(CRYPTO_SRCS libs/OTExtension/util/crypto/crypto.cpp libs/OTExtension/util/crypto/ecc-pk-crypto.cpp libs/OTExtension/util/crypto/gmp-pk-crypto.cpp libs/OTExtension/util/crypto/intrin_sequential_enc8.cpp libs/OTExtension/util/crypto/TedKrovetzAesNiWrapperC.cpp)
 add_library(OTX_CRYPTO ${CRYPTO_SRCS})
-target_link_libraries(OTX_CRYPTO MIRACL ${OPENSSL_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${GMP_LIBRARIES} ${GMPXX_LIBRARIES})
+target_link_libraries(OTX_CRYPTO MIRACL_OTX ${OPENSSL_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${GMP_LIBRARIES} ${GMPXX_LIBRARIES})
 
 set(OTX_SRCS libs/OTExtension/ot/alsz-ot-ext-rec.cpp libs/OTExtension/ot/alsz-ot-ext-snd.cpp libs/OTExtension/ot/ot-ext-rec.cpp libs/OTExtension/ot/iknp-ot-ext-rec.cpp libs/OTExtension/ot/iknp-ot-ext-snd.cpp libs/OTExtension/ot/kk-ot-ext-rec.cpp libs/OTExtension/ot/kk-ot-ext-snd.cpp libs/OTExtension/ot/nnob-ot-ext-rec.cpp libs/OTExtension/ot/nnob-ot-ext-snd.cpp libs/OTExtension/ot/ot-ext-snd.cpp libs/OTExtension/ot/ot-ext.cpp libs/OTExtension/ot/naor-pinkas.cpp libs/OTExtension/ot/pvwddh.cpp libs/OTExtension/ot/simpleot.cpp)
 add_library(OTX ${OTX_SRCS})

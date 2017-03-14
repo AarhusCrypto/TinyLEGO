@@ -26,7 +26,7 @@
 #ifndef _BCH_H
 #define _BCH_H
 
-#include "util/global-constants.h"
+#include "tiny-util/global-constants.h"
 
 #include <stdint.h>
 

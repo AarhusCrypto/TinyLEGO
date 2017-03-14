@@ -1,7 +1,7 @@
 #ifndef TINY_CIRCUIT_CIRCUIT_H_
 #define TINY_CIRCUIT_CIRCUIT_H_
 
-#include "util/typedefs.h"
+#include "tiny-util/typedefs.h"
 
 enum GATE {
   AND = 0,

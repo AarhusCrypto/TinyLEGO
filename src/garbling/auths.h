@@ -1,7 +1,7 @@
 #ifndef TINY_GARBLING_AUTHS_H_
 #define TINY_GARBLING_AUTHS_H_
 
-#include "util/typedefs.h"
+#include "tiny-util/typedefs.h"
 
 //Convenience class for storing pointers
 class Auths {

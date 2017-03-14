@@ -1,7 +1,7 @@
-set(NETWORK_SRCS util/network.cpp)
+set(NETWORK_SRCS tiny-util/network.cpp)
 add_library(NETWORK ${NETWORK_SRCS})
 
-set(CHANNEL_SRCS util/channel.cpp)
+set(CHANNEL_SRCS tiny-util/channel.cpp)
 add_library(CHANNEL ${CHANNEL_SRCS})
 target_link_libraries(CHANNEL ${ZMQ_LIBRARIES})
 

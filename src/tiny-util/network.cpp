@@ -1,4 +1,4 @@
-#include "util/network.h"
+#include "tiny-util/network.h"
 
 Network::Network(const char* m_nAddr, USHORT m_nPort) : m_nAddr(m_nAddr) {
   m_vSocket = new CSocket();
