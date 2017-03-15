@@ -6,9 +6,11 @@
 // #define PRINT_COM
 // #define DEBUG_SOLDERINGS_INP_BUCKETS
 
-static uint8_t constant_seeds[2][16] = {
+static uint8_t tiny_constant_seeds[2][16] = {
   {0x43, 0x73, 0x98, 0x41, 0x70, 0x12, 0x38, 0x78, 0xAB, 0x45, 0x78, 0xFF, 0xEA, 0xD3, 0xFF, 0x00},
   {0x43, 0x73, 0x98, 0x41, 0x70, 0x12, 0x38, 0x78, 0x43, 0x73, 0x98, 0x41, 0x66, 0x19, 0xAA, 0xFE}};
+
+static std::string gen_matrix_path("libs/SplitCommit/matrices/bch-128x134.txt");
 
 //AES Stuff
 #define AES_KEY_BITS      128
@@ -18,14 +20,14 @@ static uint8_t constant_seeds[2][16] = {
 
 static uint8_t global_aes_key[AES_KEY_BYTES] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c};
 
-#define CSEC 128
-#define CSEC_BYTES 16
-#define SSEC 40
-#define SSEC_BYTES 5
-#define BCH_BITS 184
-#define BCH_BYTES 23
-#define CODEWORD_BITS 312
-#define CODEWORD_BYTES 39
+// #define CSEC 128
+// #define CSEC_BYTES 16
+// #define SSEC 40
+// #define SSEC_BYTES 5
+// #define BCH_BITS 184
+// #define BCH_BYTES 23
+// #define CODEWORD_BITS 312
+// #define CODEWORD_BYTES 39
 
 #define COMMIT_HALF_BLOCK_SIZE 64
 #define COMMIT_NUM_TRANSPOSE_BLOCKS 8
@@ -36,7 +38,7 @@ static uint8_t global_aes_key[AES_KEY_BYTES] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0x
 #define CONFIG_BCH_CONST_T SSEC/2
 
 //Channels
-#define GLOBAL_PARAMS_CHAN OT_ADMIN_CHANNEL-1
+// #define GLOBAL_PARAMS_CHAN OT_ADMIN_CHANNEL-1
 
 #define MAX_TOTAL_PARAMS 10000 //Can be up to 65532, but performance seems to decrease
 

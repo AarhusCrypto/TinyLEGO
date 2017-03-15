@@ -1,21 +1,23 @@
 #ifndef TINY_TINY_PARAMS_H_
 #define TINY_TINY_PARAMS_H_
 
-#include "OTExtension/util/crypto/crypto.h"
-#include "prg/random.h"
-#include "tiny-util/network.h"
-#include "tiny-util/channel.h"
+// #include "OTExtension/util/crypto/crypto.h"
+// #include "prg/random.h"
+// #include "tiny-util/network.h"
+// #include "tiny-util/channel.h"
+
+#include "tiny-util/util.h"
 
 class Params {
 public:
-  Params(uint8_t* seed, uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, std::string ip_address, uint16_t port, uint8_t net_role, zmq::context_t& context, int num_exces, int exec_id = GLOBAL_PARAMS_CHAN, bool optimize_online = FALSE);
-  Params(Params& MainParams, uint8_t* seed, uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, int exec_id);
+  Params(uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, int num_exces, int exec_id = 255, bool optimize_online = false);
+  Params(Params& MainParams, uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, int exec_id);
 
   void ComputeCheckFractions();
   void ComputeGateAndAuthNumbers(uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs);
 
-  crypto crypt;
-  PRNG rnd;
+  // crypto crypt;
+  // PRNG rnd;
   
   uint64_t delta_pos;
   uint64_t num_pre_gates;
@@ -57,18 +59,18 @@ public:
 
 
   //Number indicators
-  uint64_t num_OT;
   uint64_t num_commits;
 
   //Non-Protocol related
   int num_cpus;
   int num_execs;
   int exec_id;
-  std::string ip_address;
-  uint16_t port;
-  uint8_t net_role;
-  zmq::context_t& context;
-  Channel chan;
+  
+  // std::string ip_address;
+  // uint16_t port;
+  // uint8_t net_role;
+  // zmq::context_t& context;
+  // Channel chan;
 };
 
 #endif /* TINY_TINY_PARAMS_H_ */

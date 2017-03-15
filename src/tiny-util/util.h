@@ -2,114 +2,110 @@
 #define TINY_UTIL_UTIL_H_
 
 #include "tiny-util/typedefs.h"
-#include "tiny-util/global-constants.h"
 
-#include "prg/random.h"
+#include "SplitCommit/src/util/util.h" //must be after above typedefs
+#include "cryptoTools/Crypto/PRNG.h" //must be after above typedefs
 
-#include "OTExtension/util/cbitvector.h"
-
-#define PAD_TO_POWER_OF_TWO(e) ( ((uint64_t) 1) << (CeilLog2(e)) )
-#define CEIL_DIVIDE(x, y)     (( ((x) + (y)-1)/(y)))
-#define BITS_TO_BYTES(bits) (CEIL_DIVIDE((bits), CHAR_BIT))
-#define BYTES_TO_BITS(bytes) (bytes * CHAR_BIT)
-#define PAD_TO_MULTIPLE(x, y)     ( CEIL_DIVIDE(x, y) * (y))
+// #define CEIL_DIVIDE(x, y)     (( ((x) + (y)-1)/(y)))
+// #define BITS_TO_BYTES(bits) (CEIL_DIVIDE((bits), CHAR_BIT))
+// #define BYTES_TO_BITS(bytes) (bytes * CHAR_BIT)
+// #define PAD_TO_MULTIPLE(x, y)     ( CEIL_DIVIDE(x, y) * (y))
 #define DOUBLE(x) _mm_slli_epi64(x,1)
 
-#define GET_TIME() std::chrono::high_resolution_clock::now()
-#define PRINT_TIME(end,begin,str) std::cout << str << ": " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << std::endl;
-#define PRINT_TIME_NANO(end,begin,str) std::cout << str << ": " << std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count() << std::endl;
+// #define GET_TIME() std::chrono::high_resolution_clock::now()
+// #define PRINT_TIME(end,begin,str) std::cout << str << ": " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << std::endl;
+// #define PRINT_TIME_NANO(end,begin,str) std::cout << str << ": " << std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count() << std::endl;
 
-#define ThisThreadSleep(sec) std::this_thread::sleep_for(std::chrono::seconds(sec));
+// #define ThisThreadSleep(sec) std::this_thread::sleep_for(std::chrono::seconds(sec));
 
 static __m128i invert_array[] = {_mm_setzero_si128(), _mm_set1_epi32(0xFFFFFFFF)};
 
-static inline void XOR_UINT8_T(uint8_t dest[], uint8_t src[], int size) {
-  for (int i = 0; i < size; i++) {
-    dest[i] ^= src[i];
-  }
-};
+// static inline void XOR_UINT8_T(uint8_t dest[], uint8_t src[], int size) {
+//   for (int i = 0; i < size; i++) {
+//     dest[i] ^= src[i];
+//   }
+// };
 
-static inline void XOR_UINT8_T(uint8_t dest[], uint8_t src0[], uint8_t src1[], int size) {
-  for (int i = 0; i < size; i++) {
-    dest[i] = src0[i] ^ src1[i];
-  }
-};
+// static inline void XOR_UINT8_T(uint8_t dest[], uint8_t src0[], uint8_t src1[], int size) {
+//   for (int i = 0; i < size; i++) {
+//     dest[i] = src0[i] ^ src1[i];
+//   }
+// };
 
-static inline void XOR_128(uint8_t dest[], uint8_t src[]) {
-  for (int i = 0; i < AES_BYTES; i++) {
-    dest[i] ^= src[i];
-  }
+// static inline void XOR_128(uint8_t dest[], uint8_t src[]) {
+//   for (int i = 0; i < AES_BYTES; i++) {
+//     dest[i] ^= src[i];
+//   }
+// };
 
-};
+// static inline void XOR_128(uint8_t dest[], uint8_t src0[], uint8_t src1[]) {
+//   for (int i = 0; i < AES_BYTES; i++) {
+//     dest[i] = src0[i] ^ src1[i];
+//   }
+// };
 
-static inline void XOR_128(uint8_t dest[], uint8_t src0[], uint8_t src1[]) {
-  for (int i = 0; i < AES_BYTES; i++) {
-    dest[i] = src0[i] ^ src1[i];
-  }
-};
+// //23 bytes
+// static inline void XOR_CheckBits(uint8_t dest[], uint8_t src[]) {
+//   for (int i = 0; i < 23; i++) {
+//     dest[i] ^= src[i];
+//   }
+// };
 
-//23 bytes
-static inline void XOR_CheckBits(uint8_t dest[], uint8_t src[]) {
-  for (int i = 0; i < 23; i++) {
-    dest[i] ^= src[i];
-  }
-};
+// static inline void XOR_CheckBits(uint8_t dest[], uint8_t src0[], uint8_t src1[]) {
+//   for (int i = 0; i < 23; i++) {
+//     dest[i] = src0[i] ^ src1[i];
+//   }
+// };
 
-static inline void XOR_CheckBits(uint8_t dest[], uint8_t src0[], uint8_t src1[]) {
-  for (int i = 0; i < 23; i++) {
-    dest[i] = src0[i] ^ src1[i];
-  }
-};
+// //39 bytes
+// static inline void XOR_CodeWords(uint8_t dest[], uint8_t src[]) {
+//   for (int i = 0; i < 39; i++) {
+//     dest[i] ^= src[i];
+//   }
+// };
 
-//39 bytes
-static inline void XOR_CodeWords(uint8_t dest[], uint8_t src[]) {
-  for (int i = 0; i < 39; i++) {
-    dest[i] ^= src[i];
-  }
-};
+// static inline void XOR_CodeWords(uint8_t dest[], uint8_t src0[], uint8_t src1[]) {
+//   for (int i = 0; i < 39; i++) {
+//     dest[i] = src0[i] ^ src1[i];
+//   }
+// };
 
-static inline void XOR_CodeWords(uint8_t dest[], uint8_t src0[], uint8_t src1[]) {
-  for (int i = 0; i < 39; i++) {
-    dest[i] = src0[i] ^ src1[i];
-  }
-};
+// static inline uint8_t GetBitReversed(int idx, uint8_t array[]) {
+//   return !!(array[idx >> 3] & MASK_BIT[idx & 0x7]);
+// };
 
-static inline uint8_t GetBitReversed(int idx, uint8_t array[]) {
-  return !!(array[idx >> 3] & MASK_BIT[idx & 0x7]);
-};
+// //MSB has highest index
+// static inline uint8_t GetBit(int idx, uint8_t array[]) {
+//   return !!(array[idx >> 3] & BIT[idx & 0x7]);
+// };
 
-//MSB has highest index
-static inline uint8_t GetBit(int idx, uint8_t array[]) {
-  return !!(array[idx >> 3] & BIT[idx & 0x7]);
-};
+// static inline void XORBitReversed(int idx, BYTE b, uint8_t array[]) {
+//   array[idx >> 3] ^= MASK_SET_BIT_C[!(b & 0x01)][idx & 0x7];
+// };
 
-static inline void XORBitReversed(int idx, BYTE b, uint8_t array[]) {
-  array[idx >> 3] ^= MASK_SET_BIT_C[!(b & 0x01)][idx & 0x7];
-};
+// static inline void XORBit(int idx, BYTE b, uint8_t array[]) {
+//   array[idx >> 3] ^= SET_BIT_C[!(b & 0x01)][idx & 0x7];
+// };
 
-static inline void XORBit(int idx, BYTE b, uint8_t array[]) {
-  array[idx >> 3] ^= SET_BIT_C[!(b & 0x01)][idx & 0x7];
-};
+// static inline void SetBitReversed(int idx, uint8_t b, uint8_t array[]) {
+//   array[idx >> 3] = (array[idx >> 3] & CMASK_BIT[idx & 0x7]) | MASK_SET_BIT_C[!(b & 0x01)][idx & 0x7];
+// };
 
-static inline void SetBitReversed(int idx, uint8_t b, uint8_t array[]) {
-  array[idx >> 3] = (array[idx >> 3] & CMASK_BIT[idx & 0x7]) | MASK_SET_BIT_C[!(b & 0x01)][idx & 0x7];
-};
-
-static inline void SetBit(int idx, uint8_t b, uint8_t array[]) {
-  array[idx >> 3] = (array[idx >> 3] & C_BIT[idx & 0x7]) | SET_BIT_C[!(b & 0x01)][idx & 0x7];
-};
+// static inline void SetBit(int idx, uint8_t b, uint8_t array[]) {
+//   array[idx >> 3] = (array[idx >> 3] & C_BIT[idx & 0x7]) | SET_BIT_C[!(b & 0x01)][idx & 0x7];
+// };
 
 
-static inline uint8_t GetLSB(__m128i s) {
-  int r = _mm_movemask_pd((__m128d) s);
-  return (r == 2 || r == 3); //Checks if lsb-1 is set or not. This is only set if lsb(array) is set.
-};
+// static inline uint8_t GetLSB(__m128i s) {
+//   int r = _mm_movemask_pd((__m128d) s);
+//   return (r == 2 || r == 3); //Checks if lsb-1 is set or not. This is only set if lsb(array) is set.
+// };
 
-//Wrapper
-static inline uint8_t GetLSB(uint8_t array[]) {
-  __m128i s = _mm_lddqu_si128((__m128i *) (array));
-  return GetLSB(s);
-};
+// //Wrapper
+// static inline uint8_t GetLSB(uint8_t array[]) {
+//   __m128i s = _mm_lddqu_si128((__m128i *) (array));
+//   return GetLSB(s);
+// };
 
 static inline uint128_t uint8_tTOuint128_t(uint8_t array[]) {
   uint128_t value =
@@ -133,10 +129,10 @@ static inline uint128_t uint8_tTOuint128_t(uint8_t array[]) {
   return value;
 };
 
-static inline bool compare128(__m128i a, __m128i b) {
-  __m128i c = _mm_xor_si128(a, b);
-  return _mm_testz_si128(c, c);
-};
+// static inline bool compare128(__m128i a, __m128i b) {
+//   __m128i c = _mm_xor_si128(a, b);
+//   return _mm_testz_si128(c, c);
+// };
 
 
 //Multiplies, but does not reduce
@@ -232,22 +228,22 @@ public:
   }
 };
 
-static inline void PrintHex(uint8_t value[], int num_bytes) {
-  for (int i = 0; i < num_bytes; ++i) {
-    std::cout << std::setw(2) << std::setfill('0') << (std::hex) << ((unsigned int) value[i]);
-  }
-  std::cout << (std::dec) << std::endl;
-}
+// static inline void PrintHex(uint8_t value[], int num_bytes) {
+//   for (int i = 0; i < num_bytes; ++i) {
+//     std::cout << std::setw(2) << std::setfill('0') << (std::hex) << ((unsigned int) value[i]);
+//   }
+//   std::cout << (std::dec) << std::endl;
+// }
 
-static inline void PrintBin(uint8_t value[], int num_bits) {
-  for (int i = 0; i < num_bits; ++i) {
-    if (i != 0 && i % CHAR_BIT == 0) {
-      cout << " ";
-    }
-    cout << (unsigned int) GetBit(i, value);
-  }
-  cout << endl;
-}
+// static inline void PrintBin(uint8_t value[], int num_bits) {
+//   for (int i = 0; i < num_bits; ++i) {
+//     if (i != 0 && i % CHAR_BIT == 0) {
+//       cout << " ";
+//     }
+//     cout << (unsigned int) GetBit(i, value);
+//   }
+//   cout << endl;
+// }
 
 //Constructs work_size / buffer_size iterations where the last iteration will contain more workload than the rest
 static inline void PartitionBufferFixedNum(std::vector<int>& from, std::vector<int>& to, int num_cpus, int work_size) {
@@ -337,110 +333,12 @@ static inline int countSetBits( void* ptr, int start, int end) {
   return count;
 }
 
-static inline void transpose_320_128(uint8_t* matrix_array_src, uint8_t* matrix_array_dst) {
-  //First do the initial transposes
-  CBitVector matrix[3];
-  int matrix_128_bytes = 128 * 128 / 8;
-  int matrix_64_bytes = 64 * 64 / 8;
-  matrix[0].AttachBuf(matrix_array_src, matrix_128_bytes);
-  matrix[1].AttachBuf(matrix_array_src + matrix_128_bytes, matrix_128_bytes);
-  matrix[2].AttachBuf(matrix_array_src + 2 * matrix_128_bytes, 2 * matrix_64_bytes);
-
-  matrix[0].EklundhBitTranspose(128, 128);
-  matrix[1].EklundhBitTranspose(128, 128);
-  matrix[2].EklundhBitTranspose(64, 2 * 64);
-
-  for (int i = 0; i < 128; ++i) {
-    std::copy(matrix_array_src + i * 16, matrix_array_src + i * 16 + 16, matrix_array_dst + i * 40);
-    std::copy(matrix_array_src + matrix_128_bytes + i * 16, matrix_array_src + matrix_128_bytes + i * 16 + 16, matrix_array_dst + 16 + i * 40);
-    std::copy(matrix_array_src + 2 * matrix_128_bytes + i * 8, matrix_array_src + 2 * matrix_128_bytes + i * 8 + 8, matrix_array_dst + 32 + i * 40);
-  }
-}
-
-static inline void transpose_128_320(uint8_t* matrix_array_src, uint8_t* matrix_array_dst) {
-  //First do the initial transposes
-  int matrix_128_bytes = 128 * 128 / 8;
-  int matrix_64_bytes = 64 * 64 / 8;
-
-  for (int i = 0; i < 128; ++i) {
-    std::copy(matrix_array_src + i * 40, matrix_array_src + i * 40 + 16, matrix_array_dst + i * 16);
-    std::copy(matrix_array_src + 16 + i * 40, matrix_array_src + 16 + i * 40 + 16, matrix_array_dst + matrix_128_bytes + i * 16);
-    std::copy(matrix_array_src + 32 + i * 40, matrix_array_src + 32 + i * 40 + 8, matrix_array_dst + 2 * matrix_128_bytes + i * 8);
-  }
-
-  CBitVector matrix[3];
-  matrix[0].AttachBuf(matrix_array_dst, matrix_128_bytes);
-  matrix[1].AttachBuf(matrix_array_dst + matrix_128_bytes, matrix_128_bytes);
-  matrix[2].AttachBuf(matrix_array_dst + 2 * matrix_128_bytes, 2 * matrix_64_bytes);
-
-  matrix[0].EklundhBitTranspose(128, 128);
-  matrix[1].EklundhBitTranspose(128, 128);
-  matrix[2].EklundhBitTranspose(2 * 64, 64);
-}
-
-static inline void transpose_320_128(uint8_t* matrix_array_src, uint8_t* matrix_array_dst, int col_num) {
-  //First do the initial transposes
-  CBitVector matrix[3];
-  int col_mul_matrix_128_bytes = col_num * (128 * 128 / 8);
-  int matrix_64_bytes = col_num * (64 * 64 / 8);
-  matrix[0].AttachBuf(matrix_array_src, col_mul_matrix_128_bytes);
-  matrix[1].AttachBuf(matrix_array_src + col_mul_matrix_128_bytes, col_mul_matrix_128_bytes);
-  matrix[2].AttachBuf(matrix_array_src + 2 * col_mul_matrix_128_bytes, 2 * col_num * matrix_64_bytes);
-
-  matrix[0].EklundhBitTranspose(128, col_num * 128);
-  matrix[1].EklundhBitTranspose(128, col_num * 128);
-  matrix[2].EklundhBitTranspose(64, 2 * col_num * 64);
-
-  int lim = col_num * 128;
-  for (int i = 0; i < lim; ++i) {
-    std::copy(matrix_array_src + i * 16, matrix_array_src + i * 16 + 16, matrix_array_dst + i * 40);
-    std::copy(matrix_array_src + col_mul_matrix_128_bytes + i * 16, matrix_array_src + col_mul_matrix_128_bytes + i * 16 + 16, matrix_array_dst + 16 + i * 40);
-    std::copy(matrix_array_src + 2 * col_mul_matrix_128_bytes + i * 8, matrix_array_src + 2 * col_mul_matrix_128_bytes + i * 8 + 8, matrix_array_dst + 32 + i * 40);
-  }
-}
-
-static inline void transpose_128_320(uint8_t* matrix_array_src, uint8_t* matrix_array_dst, int col_num) {
-  //First do the initial transposes
-  int col_mul_matrix_128_bytes = col_num * (128 * 128 / 8);
-  int matrix_64_bytes = 64 * 64 / 8;
-
-  int lim = col_num * 128;
-  for (int i = 0; i < lim; ++i) {
-    std::copy(matrix_array_src + i * 40, matrix_array_src + i * 40 + 16, matrix_array_dst + i * 16);
-    std::copy(matrix_array_src + 16 + i * 40, matrix_array_src + 16 + i * 40 + 16, matrix_array_dst + col_mul_matrix_128_bytes + i * 16);
-    std::copy(matrix_array_src + 32 + i * 40, matrix_array_src + 32 + i * 40 + 8, matrix_array_dst + 2 * col_mul_matrix_128_bytes + i * 8);
-  }
-
-  CBitVector matrix[3];
-  matrix[0].AttachBuf(matrix_array_dst, col_mul_matrix_128_bytes);
-  matrix[1].AttachBuf(matrix_array_dst + col_mul_matrix_128_bytes, col_mul_matrix_128_bytes);
-  matrix[2].AttachBuf(matrix_array_dst + 2 * col_mul_matrix_128_bytes, 2 * col_num * matrix_64_bytes);
-
-  matrix[0].EklundhBitTranspose(col_num * 128, 128);
-  matrix[1].EklundhBitTranspose(col_num * 128, 128);
-  matrix[2].EklundhBitTranspose(2 * col_num * 64, 64);
-}
-
-static inline void transpose_320_64(uint8_t* matrix_array, int col_num) {
-  int matrix_64_bytes = 64 * 64 / 8;
-  CBitVector matrix;
-  matrix.AttachBuf(matrix_array, 5 * col_num * matrix_64_bytes);
-  matrix.EklundhBitTranspose(5 * 64, col_num * 64);
-}
-
-static inline void transpose_64_320(uint8_t* matrix_array, int col_num) {
-  int matrix_64_bytes = 64 * 64 / 8;
-  CBitVector matrix;
-  matrix.AttachBuf(matrix_array, 5 * col_num * matrix_64_bytes);
-  matrix.EklundhBitTranspose(64 * col_num, 5 * 64);
-}
-
 static inline void PermuteArray(uint32_t array[], int size, uint8_t seed[]) {
   uint32_t tmpidx;
   std::unique_ptr<uint64_t[]> randomness(new uint64_t[size]);
-  PRNG rnd;
-  rnd.SetSeed(seed);
-  rnd.GenRnd((uint8_t*) randomness.get(), size * sizeof(uint64_t));
+  osuCrypto::PRNG rnd;
+  rnd.SetSeed(load_block(seed));
+  rnd.get<uint8_t>((uint8_t*) randomness.get(), size * sizeof(uint64_t));
   for (int i = 0; i < size; ++i) {
     tmpidx = randomness[i] % (size - i);
     std::swap(array[i], array[i + tmpidx]);

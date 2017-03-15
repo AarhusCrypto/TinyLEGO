@@ -1,8 +1,18 @@
-#include "tiny/tiny.h"
+#include "tiny/params.h"
 
-Params::Params(uint8_t* seed, uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, std::string ip_address, uint16_t port, uint8_t net_role, zmq::context_t& context, int num_execs, int exec_id, bool optimize_online) : crypt(CSEC, seed), num_cpus(std::thread::hardware_concurrency()), num_execs(num_execs), exec_id(exec_id), context(context), ip_address(ip_address), port(port), net_role(net_role), chan(ip_address, port + exec_id + 1, port + exec_id + 1 + MAX_TOTAL_PARAMS, net_role, context){
+Params::Params(uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, int num_execs, int exec_id, bool optimize_online) :
+// crypt(CSEC, seed),
+num_cpus(std::thread::hardware_concurrency()),
+num_execs(num_execs),
+exec_id(exec_id)
+// context(context),
+// ip_address(ip_address),
+// port(port),
+// net_role(net_role),
+// chan(ip_address, port + exec_id + 1, port + exec_id + 1 + MAX_TOTAL_PARAMS, net_role, context) {
+  {
 
-  rnd.SetSeed(seed);
+  // rnd.SetSeed(seed);
 
   bool found = false;
   for (int i = 0; i < bucket_param_table_size; ++i) {
@@ -43,9 +53,18 @@ Params::Params(uint8_t* seed, uint64_t num_pre_gates, uint64_t num_pre_inputs, u
   ComputeGateAndAuthNumbers(num_pre_gates, num_pre_inputs, num_pre_outputs);
 }
 
-Params::Params(Params& MainParams, uint8_t* seed, uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, int exec_id) : crypt(CSEC, seed), num_cpus(std::thread::hardware_concurrency()), num_execs(MainParams.num_execs), exec_id(exec_id), context(MainParams.context), ip_address(MainParams.ip_address), port(MainParams.port), net_role(MainParams.net_role), chan(ip_address, port + exec_id + 1, port + exec_id + 1 + MAX_TOTAL_PARAMS, net_role, context) {
-
-  rnd.SetSeed(seed);
+Params::Params(Params& MainParams, uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, int exec_id) :
+  // crypt(CSEC, seed),
+  num_cpus(std::thread::hardware_concurrency()),
+  num_execs(MainParams.num_execs),
+  exec_id(exec_id)
+  // context(MainParams.context),
+  // ip_address(MainParams.ip_address),
+  // port(MainParams.port),
+  // net_role(MainParams.net_role),
+  // chan(ip_address, port + exec_id + 1, port + exec_id + 1 + MAX_TOTAL_PARAMS, net_role, context) {
+  {
+  // rnd.SetSeed(seed);
 
   num_auth = MainParams.num_auth;
   num_bucket = MainParams.num_bucket;
@@ -81,7 +100,7 @@ void Params::ComputeGateAndAuthNumbers(uint64_t num_pre_gates, uint64_t num_pre_
   out_lsb_blind_start = 3 * Q + A + 1 + AES_BITS; //num_pre_outputs commits
   ot_chosen_start = 3 * Q + A + 1 + AES_BITS + num_pre_outputs; //num_pre_inputs + s commits
 
-  num_OT = CODEWORD_BITS + num_pre_inputs + SSEC;
+  // num_OT = num_pre_inputs + SSEC;
   num_commits = num_garbled_wires + AES_BITS + num_pre_outputs + num_pre_inputs; //k commitments will be used to blind VerLeak in offline phase.
 }
 
