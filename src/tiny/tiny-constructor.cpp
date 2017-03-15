@@ -277,7 +277,7 @@ void TinyConstructor::Preprocess() {
             throw std::runtime_error("Receiver cheating. Trying to make us open to wrong OT!");
           }
         }
-        std::cout << exec_id << std::endl;
+        
         //As receiver sent correct input masks, we now decommit to the same values. Will prove that sender indeed comitted to Delta
         commit_senders[exec_id].Decommit(chosen_decommit_shares, *exec_channels[exec_id]);
       }
@@ -289,177 +289,187 @@ void TinyConstructor::Preprocess() {
       auto verleak_end = GET_TIME();
       durations[CONST_VERLEAK_TIME][exec_id] = verleak_end - verleak_begin;
 
-      // //===========================Run Garbling================================
-      // auto garbling_begin = GET_TIME();
+      //===========================Run Garbling================================
+      auto garbling_begin = GET_TIME();
 
-      // //Holds all memory needed for garbling
-      // std::unique_ptr<uint8_t[]> raw_garbling_data(std::make_unique<uint8_t[]>(3 * thread_params->Q * CSEC_BYTES + 2 * thread_params->A * CSEC_BYTES + (3 * thread_params->Q + thread_params->A) * CSEC_BYTES));
-      // std::unique_ptr<uint32_t[]> raw_id_data(std::make_unique<uint32_t[]>(thread_params->Q + thread_params->A));
+      //Holds all memory needed for garbling
+      std::unique_ptr<uint8_t[]> raw_garbling_data(std::make_unique<uint8_t[]>(3 * thread_params_vec[exec_id]->Q * CSEC_BYTES + 2 * thread_params_vec[exec_id]->A * CSEC_BYTES + (3 * thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A) * CSEC_BYTES));
+      std::unique_ptr<uint32_t[]> raw_id_data(std::make_unique<uint32_t[]>(thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A));
 
-      // //For convenience we assign pointers into the garbling data.
-      // HalfGates gates_data;
-      // gates_data.T_G = raw_garbling_data.get();
-      // gates_data.T_E = gates_data.T_G + thread_params->Q * CSEC_BYTES;
-      // gates_data.S_O = gates_data.T_E + thread_params->Q * CSEC_BYTES;
+      //For convenience we assign pointers into the garbling data.
+      HalfGates gates_data;
+      gates_data.T_G = raw_garbling_data.get();
+      gates_data.T_E = gates_data.T_G + thread_params_vec[exec_id]->Q * CSEC_BYTES;
+      gates_data.S_O = gates_data.T_E + thread_params_vec[exec_id]->Q * CSEC_BYTES;
 
-      // Auths auths_data;
-      // auths_data.H_0 = gates_data.S_O + thread_params->Q * CSEC_BYTES;
-      // auths_data.H_1 = auths_data.H_0 + thread_params->A * CSEC_BYTES;
+      Auths auths_data;
+      auths_data.H_0 = gates_data.S_O + thread_params_vec[exec_id]->Q * CSEC_BYTES;
+      auths_data.H_1 = auths_data.H_0 + thread_params_vec[exec_id]->A * CSEC_BYTES;
 
-      // uint8_t* keys = auths_data.H_1 + thread_params->A * CSEC_BYTES;
+      uint8_t* keys = auths_data.H_1 + thread_params_vec[exec_id]->A * CSEC_BYTES;
 
-      // uint32_t* gate_ids = raw_id_data.get();
-      // uint32_t* auth_ids = gate_ids + thread_params->Q;
+      uint32_t* gate_ids = raw_id_data.get();
+      uint32_t* auth_ids = gate_ids + thread_params_vec[exec_id]->Q;
 
-      // //Construct all 0-keys used in gates and all gate ids
-      // for (int i = 0; i < thread_params->Q; ++i) {
-      //   XOR_128(keys + i * CSEC_BYTES, commit_snd->commit_shares0[thread_params->left_keys_start + i], commit_snd->commit_shares1[thread_params->left_keys_start + i]);
-      //   XOR_128(keys + (thread_params->Q + i) * CSEC_BYTES, commit_snd->commit_shares0[thread_params->right_keys_start + i], commit_snd->commit_shares1[thread_params->right_keys_start + i]);
-      //   XOR_128(keys + (2 * thread_params->Q + i) * CSEC_BYTES, commit_snd->commit_shares0[thread_params->out_keys_start + i], commit_snd->commit_shares1[thread_params->out_keys_start + i]);
-      //   gate_ids[i] = exec_id * (thread_params->Q + thread_params->A) + thread_params->out_keys_start + i;
-      // }
+      //Construct all 0-keys used in gates and all gate ids
+      for (int i = 0; i < thread_params_vec[exec_id]->Q; ++i) {
+        XOR_128(keys + i * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id]->left_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->left_keys_start + i]);
+        XOR_128(keys + (thread_params_vec[exec_id]->Q + i) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id]->right_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->right_keys_start + i]);
+        XOR_128(keys + (2 * thread_params_vec[exec_id]->Q + i) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id]->out_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->out_keys_start + i]);
+        gate_ids[i] = exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A) + thread_params_vec[exec_id]->out_keys_start + i;
+      }
 
-      // //Garble all gates which stores the garbled tables in gates_data.T_G and gates_data.T_E and output keys in gates_data.S_O for convenience
-      // GarblingHandler gh(*thread_params);
-      // gh.GarbleGates(gates_data, 0, keys, keys + thread_params->Q * CSEC_BYTES, global_delta, gate_ids, thread_params->Q);
+      //Garble all gates which stores the garbled tables in gates_data.T_G and gates_data.T_E and output keys in gates_data.S_O for convenience
+      GarblingHandler gh(*thread_params_vec[exec_id]);
+      gh.GarbleGates(gates_data, 0, keys, keys + thread_params_vec[exec_id]->Q * CSEC_BYTES, global_delta, gate_ids, thread_params_vec[exec_id]->Q);
 
-      // //Solder output wire with the designated committed value for output wires
-      // for (uint32_t i = 0; i < thread_params->Q; ++i) {
-      //   XOR_128(gates_data.S_O + i * CSEC_BYTES, keys + (2 * thread_params->Q + i) * CSEC_BYTES);
-      // }
+      //Solder output wire with the designated committed value for output wires
+      for (uint32_t i = 0; i < thread_params_vec[exec_id]->Q; ++i) {
+        XOR_128(gates_data.S_O + i * CSEC_BYTES, keys + (2 * thread_params_vec[exec_id]->Q + i) * CSEC_BYTES);
+      }
 
-      // //Construct all 0-keys used for authenticators and all auth ids
-      // for (int i = 0; i < thread_params->A; ++i) {
-      //   XOR_128(keys + (3 * thread_params->Q + i) * CSEC_BYTES, commit_snd->commit_shares0[thread_params->auth_start + i], commit_snd->commit_shares1[thread_params->auth_start + i]);
+      //Construct all 0-keys used for authenticators and all auth ids
+      for (int i = 0; i < thread_params_vec[exec_id]->A; ++i) {
+        XOR_128(keys + (3 * thread_params_vec[exec_id]->Q + i) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id]->auth_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->auth_start + i]);
 
-      //   auth_ids[i] = exec_id * (thread_params->Q + thread_params->A) + thread_params->auth_start + i;
-      // }
+        auth_ids[i] = exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A) + thread_params_vec[exec_id]->auth_start + i;
+      }
 
-      // //Garble the auths which stores the two authenticators in auths_data.H_0 and auths_data.H_1
-      // gh.GarbleAuths(auths_data, 0, keys + 3 * thread_params->Q * CSEC_BYTES, global_delta, auth_ids, thread_params->A);
+      //Garble the auths which stores the two authenticators in auths_data.H_0 and auths_data.H_1
+      gh.GarbleAuths(auths_data, 0, keys + 3 * thread_params_vec[exec_id]->Q * CSEC_BYTES, global_delta, auth_ids, thread_params_vec[exec_id]->A);
 
-      // //Sends gates and auths (but not keys)
-      // thread_params->chan.Send(raw_garbling_data.get(), 3 * thread_params->Q * CSEC_BYTES + 2 * thread_params->A * CSEC_BYTES);
+      //Sends gates and auths (but not keys)
+      exec_channels[exec_id]->asyncSendCopy(raw_garbling_data.get(), 3 * thread_params_vec[exec_id]->Q * CSEC_BYTES + 2 * thread_params_vec[exec_id]->A * CSEC_BYTES);
 
-      // auto garbling_end = GET_TIME();
-      // durations[CONST_GARBLING_TIME][exec_id] = garbling_end - garbling_begin;
-      // //========================Run Cut-and-Choose=============================
+      auto garbling_end = GET_TIME();
+      durations[CONST_GARBLING_TIME][exec_id] = garbling_end - garbling_begin;
+      //========================Run Cut-and-Choose=============================
 
-      // //Receive challenge seed and sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
-      // // uint8_t* cnc_seed = thread_params->chan.blocking_receive();
-      // uint8_t cnc_seed[CSEC_BYTES];
-      // thread_params->chan.ReceiveBlocking(cnc_seed, CSEC_BYTES);
-      // auto cnc_begin = GET_TIME();
+      //Receive challenge seed and sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
+      // uint8_t* cnc_seed = thread_params_vec[exec_id]->chan.blocking_receive();
+      uint8_t cnc_seed[CSEC_BYTES];
+      exec_channels[exec_id]->recv(cnc_seed, CSEC_BYTES);
+      auto cnc_begin = GET_TIME();
 
-      // //Sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
-      // int num_bytes_gates = BITS_TO_BYTES(thread_params->Q);
-      // int num_bytes_auths = BITS_TO_BYTES(thread_params->A);
-      // PRNG cnc_rand;
-      // cnc_rand.SetSeed(cnc_seed);
+      //Sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
+      int num_bytes_gates = BITS_TO_BYTES(thread_params_vec[exec_id]->Q);
+      int num_bytes_auths = BITS_TO_BYTES(thread_params_vec[exec_id]->A);
+      osuCrypto::PRNG cnc_rand;
+      cnc_rand.SetSeed(load_block(cnc_seed));
 
-      // std::unique_ptr<uint8_t[]> cnc_check_gates(std::make_unique<uint8_t[]>(num_bytes_gates + num_bytes_auths));
-      // uint8_t* cnc_check_auths = cnc_check_gates.get() + num_bytes_gates;
-      // WeightedRandomString(cnc_check_gates.get(), thread_params->p_g, num_bytes_gates, cnc_rand);
-      // WeightedRandomString(cnc_check_auths, thread_params->p_a, num_bytes_auths, cnc_rand);
+      std::unique_ptr<uint8_t[]> cnc_check_gates(std::make_unique<uint8_t[]>(num_bytes_gates + num_bytes_auths));
+      uint8_t* cnc_check_auths = cnc_check_gates.get() + num_bytes_gates;
+      WeightedRandomString(cnc_check_gates.get(), thread_params_vec[exec_id]->p_g, num_bytes_gates, cnc_rand);
+      WeightedRandomString(cnc_check_auths, thread_params_vec[exec_id]->p_a, num_bytes_auths, cnc_rand);
 
-      // int num_check_gates = countSetBits(cnc_check_gates.get(), 0, thread_params->Q - 1);
-      // int num_check_auths = countSetBits(cnc_check_auths, 0, thread_params->A - 1);
+      int num_check_gates = countSetBits(cnc_check_gates.get(), 0, thread_params_vec[exec_id]->Q - 1);
+      int num_check_auths = countSetBits(cnc_check_auths, 0, thread_params_vec[exec_id]->A - 1);
 
-      // std::unique_ptr<uint8_t[]> left_cnc_input(std::make_unique<uint8_t[]>(3 * BITS_TO_BYTES(num_check_gates) + BITS_TO_BYTES(num_check_auths)));
-      // uint8_t* right_cnc_input = left_cnc_input.get() + BITS_TO_BYTES(num_check_gates);
-      // uint8_t* out_cnc_input = right_cnc_input + BITS_TO_BYTES(num_check_gates);
-      // uint8_t* auth_cnc_input = out_cnc_input + BITS_TO_BYTES(num_check_gates);
+      std::unique_ptr<uint8_t[]> left_cnc_input(std::make_unique<uint8_t[]>(3 * BITS_TO_BYTES(num_check_gates) + BITS_TO_BYTES(num_check_auths)));
+      uint8_t* right_cnc_input = left_cnc_input.get() + BITS_TO_BYTES(num_check_gates);
+      uint8_t* out_cnc_input = right_cnc_input + BITS_TO_BYTES(num_check_gates);
+      uint8_t* auth_cnc_input = out_cnc_input + BITS_TO_BYTES(num_check_gates);
 
-      // cnc_rand.GenRnd(left_cnc_input.get(), BITS_TO_BYTES(num_check_gates));
-      // cnc_rand.GenRnd(right_cnc_input, BITS_TO_BYTES(num_check_gates));
-      // for (int i = 0; i < BITS_TO_BYTES(num_check_gates); ++i) {
-      //   out_cnc_input[i] = left_cnc_input[i] & right_cnc_input[i];
-      // }
+      cnc_rand.get<uint8_t>(left_cnc_input.get(), BITS_TO_BYTES(num_check_gates));
+      cnc_rand.get<uint8_t>(right_cnc_input, BITS_TO_BYTES(num_check_gates));
+      for (int i = 0; i < BITS_TO_BYTES(num_check_gates); ++i) {
+        out_cnc_input[i] = left_cnc_input[i] & right_cnc_input[i];
+      }
 
-      // cnc_rand.GenRnd(auth_cnc_input, BITS_TO_BYTES(num_check_auths));
+      cnc_rand.get<uint8_t>(auth_cnc_input, BITS_TO_BYTES(num_check_auths));
 
-      // //Construct the CNC keys using the above-sampled information and also stores the check indices to be used for later decommit construction. Notice we only compute left and right keys as the output key can be computed on the evaluator side given these two. However we need to include the output key in the indices as they need to be included in the decommits.
-      // int num_checks = 3 * num_check_gates + num_check_auths;
-      // int num_check_keys_sent = 2 * num_check_gates + num_check_auths;
-      // std::unique_ptr<uint8_t[]> cnc_reply_keys(std::make_unique<uint8_t[]>(num_check_keys_sent * CSEC_BYTES));
+      //Construct the CNC keys using the above-sampled information and also stores the check indices to be used for later decommit construction. Notice we only compute left and right keys as the output key can be computed on the evaluator side given these two. However we need to include the output key in the indices as they need to be included in the decommits.
+      int num_checks = 3 * num_check_gates + num_check_auths;
+      int num_check_keys_sent = 2 * num_check_gates + num_check_auths;
+      std::unique_ptr<uint8_t[]> cnc_reply_keys(std::make_unique<uint8_t[]>(num_check_keys_sent * CSEC_BYTES));
+
+      std::array<BYTEArrayVector, 2> cnc_decommit_shares = {
+        BYTEArrayVector(num_checks, CODEWORD_BYTES),
+        BYTEArrayVector(num_checks, CODEWORD_BYTES)
+      };
+
       // std::unique_ptr<uint8_t[]> cnc_decommit_shares0(std::make_unique<uint8_t[]>(2 * num_checks * CODEWORD_BYTES));
       // uint8_t* cnc_decommit_shares1 = cnc_decommit_shares0.get() + num_checks * CODEWORD_BYTES;
 
-      // int current_auth_check_num = 0;
-      // int current_eval_auth_num = 0;
-      // for (uint32_t i = 0; i < thread_params->A; ++i) {
-      //   if (GetBit(i, cnc_check_auths)) {
-      //     XOR_128(cnc_reply_keys.get() + current_auth_check_num * CSEC_BYTES, commit_snd->commit_shares0[thread_params->auth_start + i], commit_snd->commit_shares1[thread_params->auth_start + i]);
-      //     std::copy(commit_snd->commit_shares0[thread_params->auth_start + i], commit_snd->commit_shares0[thread_params->auth_start + i] + CODEWORD_BYTES, cnc_decommit_shares0.get() + current_auth_check_num * CODEWORD_BYTES);
-      //     std::copy(commit_snd->commit_shares1[thread_params->auth_start + i], commit_snd->commit_shares1[thread_params->auth_start + i] + CODEWORD_BYTES, cnc_decommit_shares1 + current_auth_check_num * CODEWORD_BYTES);
-      //     if (GetBit(current_auth_check_num, auth_cnc_input)) {
-      //       XOR_128(cnc_reply_keys.get() + current_auth_check_num * CSEC_BYTES, global_delta);
-      //       XOR_CodeWords(cnc_decommit_shares0.get() + current_auth_check_num * CODEWORD_BYTES, commit_snd->commit_shares0[thread_params->delta_pos]);
-      //       XOR_CodeWords(cnc_decommit_shares1 + current_auth_check_num * CODEWORD_BYTES, commit_snd->commit_shares1[thread_params->delta_pos]);
-      //     }
-      //     ++current_auth_check_num;
-      //   } else if (current_eval_auth_num < thread_params->num_eval_auths) {
-      //     //Populate the array with the correct eval auth indices
-      //     tmp_auth_eval_ids[thread_params->num_eval_auths * exec_id + current_eval_auth_num] = exec_id * (thread_params->Q + thread_params->A) + thread_params->auth_start + i;
-      //     ++current_eval_auth_num;
-      //   }
-      // }
+      int current_auth_check_num = 0;
+      int current_eval_auth_num = 0;
+      for (uint32_t i = 0; i < thread_params_vec[exec_id]->A; ++i) {
+        if (GetBit(i, cnc_check_auths)) {
+          XOR_128(cnc_reply_keys.get() + current_auth_check_num * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id]->auth_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->auth_start + i]);
+          std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id]->auth_start + i], commit_shares[exec_id][0][thread_params_vec[exec_id]->auth_start + i + 1], cnc_decommit_shares[0][current_auth_check_num]);
+          std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id]->auth_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->auth_start + i + 1], cnc_decommit_shares[1][current_auth_check_num]);
+          if (GetBit(current_auth_check_num, auth_cnc_input)) {
+            XOR_128(cnc_reply_keys.get() + current_auth_check_num * CSEC_BYTES, global_delta);
+            XOR_CodeWords(cnc_decommit_shares[0][current_auth_check_num], commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos]);
+            XOR_CodeWords(cnc_decommit_shares[1][current_auth_check_num], commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos]);
+          }
+          ++current_auth_check_num;
+        } else if (current_eval_auth_num < thread_params_vec[exec_id]->num_eval_auths) {
+          //Populate the array with the correct eval auth indices
+          tmp_auth_eval_ids[thread_params_vec[exec_id]->num_eval_auths * exec_id + current_eval_auth_num] = exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A) + thread_params_vec[exec_id]->auth_start + i;
+          ++current_eval_auth_num;
+        }
+      }
 
-      // //Now for the gates
-      // int current_check_num = 0;
-      // int current_eval_gate_num = 0;
-      // for (uint32_t i = 0; i < thread_params->Q; ++i) {
-      //   if (GetBit(i, cnc_check_gates.get())) {
+      //Now for the gates
+      int current_check_gate_num = 0;
+      int current_eval_gate_num = 0;
+      for (uint32_t i = 0; i < thread_params_vec[exec_id]->Q; ++i) {
+        if (GetBit(i, cnc_check_gates.get())) {
 
-      //     //Left
-      //     XOR_128(cnc_reply_keys.get() + (num_check_auths + current_check_num) * CSEC_BYTES, commit_snd->commit_shares0[thread_params->left_keys_start + i], commit_snd->commit_shares1[thread_params->left_keys_start + i]);
-      //     std::copy(commit_snd->commit_shares0[thread_params->left_keys_start + i], commit_snd->commit_shares0[thread_params->left_keys_start + i] + CODEWORD_BYTES, cnc_decommit_shares0.get() + (num_check_auths + current_check_num) * CODEWORD_BYTES);
-      //     std::copy(commit_snd->commit_shares1[thread_params->left_keys_start + i], commit_snd->commit_shares1[thread_params->left_keys_start + i] + CODEWORD_BYTES, cnc_decommit_shares1 + (num_check_auths + current_check_num) * CODEWORD_BYTES);
+          //Left
+          XOR_128(cnc_reply_keys.get() + (num_check_auths + current_check_gate_num) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id]->left_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->left_keys_start + i]);
+          std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id]->left_keys_start + i], commit_shares[exec_id][0][thread_params_vec[exec_id]->left_keys_start + i + 1], cnc_decommit_shares[0][num_check_auths + current_check_gate_num]);
+          std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id]->left_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->left_keys_start + i + 1], cnc_decommit_shares[1][num_check_auths + current_check_gate_num]);
 
-      //     //We include the global delta if the left-input is supposed to be 1.
-      //     if (GetBit(current_check_num, left_cnc_input.get())) {
-      //       XOR_128(cnc_reply_keys.get() + (num_check_auths + current_check_num) * CSEC_BYTES, global_delta);
-      //       XOR_CodeWords(cnc_decommit_shares0.get() + (num_check_auths + current_check_num) * CODEWORD_BYTES, commit_snd->commit_shares0[thread_params->delta_pos]);
-      //       XOR_CodeWords(cnc_decommit_shares1 + (num_check_auths + current_check_num) * CODEWORD_BYTES, commit_snd->commit_shares1[thread_params->delta_pos]);
-      //     }
+          //We include the global delta if the left-input is supposed to be 1.
+          if (GetBit(current_check_gate_num, left_cnc_input.get())) {
+            XOR_128(cnc_reply_keys.get() + (num_check_auths + current_check_gate_num) * CSEC_BYTES, global_delta);
+            XOR_CodeWords(cnc_decommit_shares[0][num_check_auths + current_check_gate_num], commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos]);
+            XOR_CodeWords(cnc_decommit_shares[1][num_check_auths + current_check_gate_num], commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos]);
+          }
 
-      //     //Right
-      //     XOR_128(cnc_reply_keys.get() + (num_check_auths + num_check_gates + current_check_num) * CSEC_BYTES, commit_snd->commit_shares0[thread_params->right_keys_start + i], commit_snd->commit_shares1[thread_params->right_keys_start + i]);
-      //     std::copy(commit_snd->commit_shares0[thread_params->right_keys_start + i], commit_snd->commit_shares0[thread_params->right_keys_start + i] + CODEWORD_BYTES, cnc_decommit_shares0.get() + (num_check_auths + num_check_gates + current_check_num) * CODEWORD_BYTES);
-      //     std::copy(commit_snd->commit_shares1[thread_params->right_keys_start + i], commit_snd->commit_shares1[thread_params->right_keys_start + i] + CODEWORD_BYTES, cnc_decommit_shares1 + (num_check_auths + num_check_gates + current_check_num) * CODEWORD_BYTES);
+          //Right
+          XOR_128(cnc_reply_keys.get() + (num_check_auths + num_check_gates + current_check_gate_num) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id]->right_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->right_keys_start + i]);
+          std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id]->right_keys_start + i], commit_shares[exec_id][0][thread_params_vec[exec_id]->right_keys_start + i + 1], cnc_decommit_shares[0][num_check_auths + num_check_gates + current_check_gate_num]);
+          std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id]->right_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->right_keys_start + i + 1], cnc_decommit_shares[1][num_check_auths + num_check_gates + current_check_gate_num]);
 
-      //     //We include the global delta if the right-input is supposed to be 1.
-      //     if (GetBit(current_check_num, right_cnc_input)) {
-      //       XOR_128(cnc_reply_keys.get() + (num_check_auths + num_check_gates + current_check_num) * CSEC_BYTES, global_delta);
-      //       XOR_CodeWords(cnc_decommit_shares0.get() + (num_check_auths + num_check_gates + current_check_num) * CODEWORD_BYTES, commit_snd->commit_shares0[thread_params->delta_pos]);
-      //       XOR_CodeWords(cnc_decommit_shares1 + (num_check_auths + num_check_gates + current_check_num) * CODEWORD_BYTES, commit_snd->commit_shares1[thread_params->delta_pos]);
-      //     }
+          //We include the global delta if the right-input is supposed to be 1.
+          if (GetBit(current_check_gate_num, right_cnc_input)) {
+            XOR_128(cnc_reply_keys.get() + (num_check_auths + num_check_gates + current_check_gate_num) * CSEC_BYTES, global_delta);
+            XOR_CodeWords(cnc_decommit_shares[0][num_check_auths + num_check_gates + current_check_gate_num], commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos]);
+            XOR_CodeWords(cnc_decommit_shares[1][num_check_auths + num_check_gates + current_check_gate_num], commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos]);
+          }
 
-      //     //Out
-      //     std::copy(commit_snd->commit_shares0[thread_params->out_keys_start + i], commit_snd->commit_shares0[thread_params->out_keys_start + i] + CODEWORD_BYTES, cnc_decommit_shares0.get() + (num_check_auths + 2 * num_check_gates + current_check_num) * CODEWORD_BYTES);
-      //     std::copy(commit_snd->commit_shares1[thread_params->out_keys_start + i], commit_snd->commit_shares1[thread_params->out_keys_start + i] + CODEWORD_BYTES, cnc_decommit_shares1 + (num_check_auths + 2 * num_check_gates + current_check_num) * CODEWORD_BYTES);
+          //Out
+          std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id]->out_keys_start + i],
+                    commit_shares[exec_id][0][thread_params_vec[exec_id]->out_keys_start + i + 1],
+                    cnc_decommit_shares[0][num_check_auths + 2 * num_check_gates + current_check_gate_num]);
+          std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id]->out_keys_start + i],
+                    commit_shares[exec_id][1][thread_params_vec[exec_id]->out_keys_start + i + 1],
+                    cnc_decommit_shares[1][num_check_auths + 2 * num_check_gates + current_check_gate_num]);
 
-      //     //We include the global delta if the right-input is supposed to be 1.
-      //     if (GetBit(current_check_num, out_cnc_input)) {
-      //       XOR_CodeWords(cnc_decommit_shares0.get() + (num_check_auths + 2 * num_check_gates + current_check_num) * CODEWORD_BYTES, commit_snd->commit_shares0[thread_params->delta_pos]);
-      //       XOR_CodeWords(cnc_decommit_shares1 + (num_check_auths + 2 * num_check_gates + current_check_num) * CODEWORD_BYTES, commit_snd->commit_shares1[thread_params->delta_pos]);
-      //     }
-      //     ++current_check_num;
-      //   }
-      //   else if (current_eval_gate_num < thread_params->num_eval_gates) {
-      //     //Populate the array with the correct eval gate indices
-      //     tmp_gate_eval_ids[thread_params->num_eval_gates * exec_id + current_eval_gate_num] = exec_id * (thread_params->Q + thread_params->A) + thread_params->out_keys_start + i;
-      //     ++current_eval_gate_num;
-      //   }
-      // }
+          //We include the global delta if the right-input is supposed to be 1.
+          if (GetBit(current_check_gate_num, out_cnc_input)) {
+            XOR_CodeWords(cnc_decommit_shares[0][num_check_auths + 2 * num_check_gates + current_check_gate_num], commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos]);
+            XOR_CodeWords(cnc_decommit_shares[1][num_check_auths + 2 * num_check_gates + current_check_gate_num], commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos]);
+          }
+          ++current_check_gate_num;
+        }
+        else if (current_eval_gate_num < thread_params_vec[exec_id]->num_eval_gates) {
+          //Populate the array with the correct eval gate indices
+          tmp_gate_eval_ids[thread_params_vec[exec_id]->num_eval_gates * exec_id + current_eval_gate_num] = exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A) + thread_params_vec[exec_id]->out_keys_start + i;
+          ++current_eval_gate_num;
+        }
+      }
 
-      // //Send all challenge keys
-      // thread_params->chan.Send(cnc_reply_keys.get(), num_check_keys_sent * CSEC_BYTES);
+      //Send all challenge keys
+      exec_channels[exec_id]->asyncSendCopy(cnc_reply_keys.get(), num_check_keys_sent * CSEC_BYTES);
 
-      // //Start decommit phase using the above-created indices
-      // commit_snd->BatchDecommit(cnc_decommit_shares0.get(), cnc_decommit_shares1, num_checks);
-      // auto cnc_end = GET_TIME();
-      // durations[CONST_CNC_TIME][exec_id] = cnc_end - cnc_begin;
+      //Start decommit phase using the above-created indices
+      commit_senders[exec_id].BatchDecommit(cnc_decommit_shares, *exec_channels[exec_id], true);
+      auto cnc_end = GET_TIME();
+      durations[CONST_CNC_TIME][exec_id] = cnc_end - cnc_begin;
     });
   }
 

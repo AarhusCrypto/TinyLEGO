@@ -187,7 +187,7 @@ void TinyEvaluator::Preprocess() {
   PermuteArray(permuted_eval_auths_ids, params.num_eval_auths, bucket_seeds + CSEC_BYTES);
 
   //store last exec_id as this execution performs the Delta-OT CnC step. This step is needed as we need to signal that the last thread execution ensures that the sender indeed committed to the global_delta used in DOT protocol. We do it in the last execution to avoid dealing with any prefix offset for all OT values, ie. we sacrifices the last SSEC OTs.
-  
+
   //Variable to keep track if execution failed
   for (int exec_id = 0; exec_id < params.num_execs; ++exec_id) {
 
@@ -307,7 +307,7 @@ void TinyEvaluator::Preprocess() {
 
         //Compute decommit shares
         BYTEArrayVector chosen_decommit_shares(SSEC, CODEWORD_BYTES);
-        
+
         for (int i = 0; i < SSEC; ++i) {
           std::copy(commit_shares[exec_id][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i], commit_shares[exec_id][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i + 1], chosen_decommit_shares[i]);
 
@@ -349,180 +349,183 @@ void TinyEvaluator::Preprocess() {
 
       auto verleak_end = GET_TIME();
       durations[EVAL_VERLEAK_TIME][exec_id] = verleak_end - verleak_begin;
-      
-      // //==========================Receive Gates===============================
-      // auto receive_gates_auths_begin = GET_TIME();
 
-      // //Sample the seed used to determine all CNC challenges
-      // uint8_t cnc_seed[CSEC_BYTES];
-      // thread_params->rnd.GenRnd(cnc_seed, CSEC_BYTES);
+      //==========================Receive Gates===============================
+      auto receive_gates_auths_begin = GET_TIME();
 
-      // //Receive all garbling data. When received we send the CNC challenge seed
-      // std::unique_ptr<uint8_t[]> raw_garbling_data(std::make_unique<uint8_t[]>(3 * thread_params->Q * CSEC_BYTES + 2 * thread_params->A * CSEC_BYTES));
-      // thread_params->chan.ReceiveBlocking(raw_garbling_data.get(), 3 * thread_params->Q * CSEC_BYTES + 2 * thread_params->A * CSEC_BYTES);
+      //Sample the seed used to determine all CNC challenges
+      uint8_t cnc_seed[CSEC_BYTES];
+      exec_rnds[exec_id].get<uint8_t>(cnc_seed, CSEC_BYTES);
 
-      // thread_params->chan.Send(cnc_seed, CSEC_BYTES);
-
-      // //Assign pointers to the garbling data. Doing this relatively for clarity
-      // HalfGates gates_data;
-      // gates_data.T_G = raw_garbling_data.get();
-      // gates_data.T_E = gates_data.T_G + thread_params->Q * CSEC_BYTES;
-      // gates_data.S_O = gates_data.T_E + thread_params->Q * CSEC_BYTES;
-
-      // Auths auths_data;
-      // auths_data.H_0 = gates_data.S_O + thread_params->Q * CSEC_BYTES;
-      // auths_data.H_1 = auths_data.H_0 + thread_params->A * CSEC_BYTES;
-
-      // auto receive_gates_auths_end = GET_TIME();
-      // durations[EVAL_RECEIVE_GATES_AUTHS_TIME][exec_id] = receive_gates_auths_end - receive_gates_auths_begin;
-
-//       //========================Run Cut-and-Choose=============================
-//       auto cnc_begin = GET_TIME();
-
-//       //Sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
-//       int num_bytes_gates = BITS_TO_BYTES(thread_params->Q);
-//       int num_bytes_auths = BITS_TO_BYTES(thread_params->A);
-//       PRNG cnc_rand;
-//       cnc_rand.SetSeed(cnc_seed);
-
-//       std::unique_ptr<uint8_t[]> cnc_check_gates(std::make_unique<uint8_t[]>(num_bytes_gates + num_bytes_auths));
-//       uint8_t* cnc_check_auths = cnc_check_gates.get() + num_bytes_gates;
-//       WeightedRandomString(cnc_check_gates.get(), thread_params->p_g, num_bytes_gates, cnc_rand);
-//       WeightedRandomString(cnc_check_auths, thread_params->p_a, num_bytes_auths, cnc_rand);
-
-//       int num_check_gates = countSetBits(cnc_check_gates.get(), 0, thread_params->Q - 1);
-//       int num_check_auths = countSetBits(cnc_check_auths, 0, thread_params->A - 1);
-
-//       std::unique_ptr<uint8_t[]> left_cnc_input(std::make_unique<uint8_t[]>(3 * BITS_TO_BYTES(num_check_gates) + BITS_TO_BYTES(num_check_auths)));
-//       uint8_t* right_cnc_input = left_cnc_input.get() + BITS_TO_BYTES(num_check_gates);
-//       uint8_t* out_cnc_input = right_cnc_input + BITS_TO_BYTES(num_check_gates);
-//       uint8_t* auth_cnc_input = out_cnc_input + BITS_TO_BYTES(num_check_gates);
-
-//       cnc_rand.GenRnd(left_cnc_input.get(), BITS_TO_BYTES(num_check_gates));
-//       cnc_rand.GenRnd(right_cnc_input, BITS_TO_BYTES(num_check_gates));
-//       for (int i = 0; i < BITS_TO_BYTES(num_check_gates); ++i) {
-//         out_cnc_input[i] = left_cnc_input[i] & right_cnc_input[i];
-//       }
-//       cnc_rand.GenRnd(auth_cnc_input, BITS_TO_BYTES(num_check_auths));
+      //Receive all garbling data. When received we send the CNC challenge seed
+      std::unique_ptr<uint8_t[]> raw_garbling_data(std::make_unique<uint8_t[]>(3 * thread_params_vec[exec_id]->Q * CSEC_BYTES + 2 * thread_params_vec[exec_id]->A * CSEC_BYTES));
+      exec_channels[exec_id]->recv(raw_garbling_data.get(), 3 * thread_params_vec[exec_id]->Q * CSEC_BYTES + 2 * thread_params_vec[exec_id]->A * CSEC_BYTES);
 
 
-//       //Construct the CNC check shares to be used for later decommit verification.
-//       int num_checks = 3 * num_check_gates + num_check_auths;
-//       std::unique_ptr<uint8_t[]> cnc_computed_shares(std::make_unique<uint8_t[]>(num_checks * CODEWORD_BYTES));
+      exec_channels[exec_id]->asyncSendCopy(cnc_seed, CSEC_BYTES);
 
-//       int current_check_auth_num = 0;
-//       int current_eval_auth_num = 0;
-//       std::unique_ptr<uint32_t[]> check_auth_ids(std::make_unique<uint32_t[]>(num_check_auths));
+      //Assign pointers to the garbling data. Doing this relatively for clarity
+      HalfGates gates_data;
+      gates_data.T_G = raw_garbling_data.get();
+      gates_data.T_E = gates_data.T_G + thread_params_vec[exec_id]->Q * CSEC_BYTES;
+      gates_data.S_O = gates_data.T_E + thread_params_vec[exec_id]->Q * CSEC_BYTES;
 
-//       //Development dirty check. Can be deleted once we have computed the correct slack bounds in params.
-//       bool filled_eval_auths = false;
-//       for (uint32_t i = 0; i < thread_params->A; ++i) {
-//         if (GetBit(i, cnc_check_auths)) {
-//           check_auth_ids[current_check_auth_num] = exec_id * (thread_params->Q + thread_params->A) + thread_params->auth_start + i;
-//           std::copy(commit_rec->commit_shares[thread_params->auth_start + i], commit_rec->commit_shares[thread_params->auth_start + i] + CODEWORD_BYTES, cnc_computed_shares.get() + current_check_auth_num * CODEWORD_BYTES);
-//           if (GetBit(current_check_auth_num, auth_cnc_input)) {
-//             XOR_CodeWords(cnc_computed_shares.get() + current_check_auth_num * CODEWORD_BYTES, commit_rec->commit_shares[thread_params->delta_pos]);
-//           }
-//           ++current_check_auth_num;
-//         } else {
-//           //Only write to num_eval_auths if it is not yet filled up. Might be wasteful, but easier to handle
-//           if (current_eval_auth_num < thread_params->num_eval_auths) {
+      Auths auths_data;
+      auths_data.H_0 = gates_data.S_O + thread_params_vec[exec_id]->Q * CSEC_BYTES;
+      auths_data.H_1 = auths_data.H_0 + thread_params_vec[exec_id]->A * CSEC_BYTES;
 
-//             uint32_t target_pos = permuted_eval_auths_ids[thread_params->num_eval_auths * exec_id + current_eval_auth_num];
-//             std::copy(auths_data.H_0 + i * CSEC_BYTES, auths_data.H_0 + i * CSEC_BYTES + CSEC_BYTES, eval_auths.H_0 + target_pos * CSEC_BYTES);
-//             std::copy(auths_data.H_1 + i * CSEC_BYTES, auths_data.H_1 + i * CSEC_BYTES + CSEC_BYTES, eval_auths.H_1 + target_pos * CSEC_BYTES);
+      auto receive_gates_auths_end = GET_TIME();
+      durations[EVAL_RECEIVE_GATES_AUTHS_TIME][exec_id] = receive_gates_auths_end - receive_gates_auths_begin;
 
-//             //Write the actual auth ID to eval_gates_ids in target_pos, which is determined by permuted_eval_auths_ids
-//             eval_auths_ids[target_pos] = exec_id * (thread_params->Q + thread_params->A) + thread_params->auth_start + i;
-//           } else {
-//             //Development dirty check. Can be deleted once we have computed the correct slack bounds in params.
-//             filled_eval_auths = true;
-//           }
+      //========================Run Cut-and-Choose=============================
+      auto cnc_begin = GET_TIME();
 
-//           ++current_eval_auth_num;
-//         }
-//       }
+      //Sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
+      int num_bytes_gates = BITS_TO_BYTES(thread_params_vec[exec_id]->Q);
+      int num_bytes_auths = BITS_TO_BYTES(thread_params_vec[exec_id]->A);
+      osuCrypto::PRNG cnc_rand;
+      cnc_rand.SetSeed(load_block(cnc_seed));
 
-//       //Now for the gates
-//       std::unique_ptr<uint32_t[]> check_gate_ids(std::make_unique<uint32_t[]>(num_check_gates));
+      std::unique_ptr<uint8_t[]> cnc_check_gates(std::make_unique<uint8_t[]>(num_bytes_gates + num_bytes_auths));
+      uint8_t* cnc_check_auths = cnc_check_gates.get() + num_bytes_gates;
+      WeightedRandomString(cnc_check_gates.get(), thread_params_vec[exec_id]->p_g, num_bytes_gates, cnc_rand);
+      WeightedRandomString(cnc_check_auths, thread_params_vec[exec_id]->p_a, num_bytes_auths, cnc_rand);
 
-//       bool filled_eval_gates = false;
-//       int current_check_gate_num = 0;
-//       int current_eval_gate_num = 0;
-//       for (uint32_t i = 0; i < thread_params->Q; ++i) {
-//         if (GetBit(i, cnc_check_gates.get())) {
-//           check_gate_ids[current_check_gate_num] = exec_id * (thread_params->Q + thread_params->A) + thread_params->out_keys_start + i;
+      int num_check_gates = countSetBits(cnc_check_gates.get(), 0, thread_params_vec[exec_id]->Q - 1);
+      int num_check_auths = countSetBits(cnc_check_auths, 0, thread_params_vec[exec_id]->A - 1);
 
-//           //Left
-//           std::copy(commit_rec->commit_shares[thread_params->left_keys_start + i], commit_rec->commit_shares[thread_params->left_keys_start + i] + CODEWORD_BYTES, cnc_computed_shares.get() + (num_check_auths + current_check_gate_num) * CODEWORD_BYTES);
-//           if (GetBit(current_check_gate_num, left_cnc_input.get())) {
-//             XOR_CodeWords(cnc_computed_shares.get() + (num_check_auths + current_check_gate_num) * CODEWORD_BYTES, commit_rec->commit_shares[thread_params->delta_pos]);
-//           }
-//           //Right
-//           std::copy(commit_rec->commit_shares[thread_params->right_keys_start + i], commit_rec->commit_shares[thread_params->right_keys_start + i] + CODEWORD_BYTES, cnc_computed_shares.get() + (num_check_auths + num_check_gates + current_check_gate_num) * CODEWORD_BYTES);
-//           if (GetBit(current_check_gate_num, right_cnc_input)) {
-//             XOR_CodeWords(cnc_computed_shares.get() + (num_check_auths + num_check_gates + current_check_gate_num) * CODEWORD_BYTES, commit_rec->commit_shares[thread_params->delta_pos]);
-//           }
-//           //Out
-//           std::copy(commit_rec->commit_shares[thread_params->out_keys_start + i], commit_rec->commit_shares[thread_params->out_keys_start + i] + CODEWORD_BYTES, cnc_computed_shares.get() + (num_check_auths + 2 * num_check_gates + current_check_gate_num) * CODEWORD_BYTES);
+      std::unique_ptr<uint8_t[]> left_cnc_input(std::make_unique<uint8_t[]>(3 * BITS_TO_BYTES(num_check_gates) + BITS_TO_BYTES(num_check_auths)));
+      uint8_t* right_cnc_input = left_cnc_input.get() + BITS_TO_BYTES(num_check_gates);
+      uint8_t* out_cnc_input = right_cnc_input + BITS_TO_BYTES(num_check_gates);
+      uint8_t* auth_cnc_input = out_cnc_input + BITS_TO_BYTES(num_check_gates);
 
-//           if (GetBit(current_check_gate_num, out_cnc_input)) {
-//             XOR_CodeWords(cnc_computed_shares.get() + (num_check_auths + 2 * num_check_gates + current_check_gate_num) * CODEWORD_BYTES, commit_rec->commit_shares[thread_params->delta_pos]);
-//           }
-//           ++current_check_gate_num;
-//         } else {
-//           //Only write to num_eval_gates if it is not yet filled up. Might be wasteful, but easier to handle
-//           if (current_eval_gate_num < thread_params->num_eval_gates) {
+      cnc_rand.get<uint8_t>(left_cnc_input.get(), BITS_TO_BYTES(num_check_gates));
+      cnc_rand.get<uint8_t>(right_cnc_input, BITS_TO_BYTES(num_check_gates));
+      for (int i = 0; i < BITS_TO_BYTES(num_check_gates); ++i) {
+        out_cnc_input[i] = left_cnc_input[i] & right_cnc_input[i];
+      }
+      cnc_rand.get<uint8_t>(auth_cnc_input, BITS_TO_BYTES(num_check_auths));
 
-//             int target_pos = permuted_eval_gates_ids[thread_params->num_eval_gates * exec_id + current_eval_gate_num];
-//             std::copy(gates_data.T_G + i * CSEC_BYTES, gates_data.T_G + i * CSEC_BYTES + CSEC_BYTES, eval_gates.T_G + target_pos * CSEC_BYTES);
-//             std::copy(gates_data.T_E + i * CSEC_BYTES, gates_data.T_E + i * CSEC_BYTES + CSEC_BYTES, eval_gates.T_E + target_pos * CSEC_BYTES);
-//             std::copy(gates_data.S_O + i * CSEC_BYTES, gates_data.S_O + i * CSEC_BYTES + CSEC_BYTES, eval_gates.S_O + target_pos * CSEC_BYTES);
 
-//             //Write the actual gate ID to eval_gates_ids in target_pos, which is determined by permuted_eval_gates_ids
-//             eval_gates_ids[target_pos] = exec_id * (thread_params->Q + thread_params->A) + thread_params->out_keys_start + i;
-//           } else {
-//             //Development dirty check. Can be deleted once we have computed the correct slack bounds in params.
-//             filled_eval_gates = true;
-//           }
+      //Construct the CNC check shares to be used for later decommit verification.
+      int num_checks = 3 * num_check_gates + num_check_auths;
+      BYTEArrayVector cnc_computed_shares(num_checks, CODEWORD_BYTES);
 
-//           ++current_eval_gate_num;
-//         }
-//       }
+      int current_check_auth_num = 0;
+      int current_eval_auth_num = 0;
+      std::unique_ptr<uint32_t[]> check_auth_ids(std::make_unique<uint32_t[]>(num_check_auths));
 
-//       //Development dirty check. Can be deleted once we have computed the correct slack bounds in params.
-//       if (!filled_eval_auths) {
-//         std::cout << "Exec_num: " << exec_id << " did not fill eval_auths" << std::endl;
-//         *ver_success = false;
-//       }
-//       if (!filled_eval_gates) {
-//         std::cout << "Exec_num: " << exec_id << " did not fill eval_gates" << std::endl;
-//         *ver_success = false;
-//       }
+      //Development dirty check. Can be deleted once we have computed the correct slack bounds in params.
+      bool filled_eval_auths = false;
+      for (uint32_t i = 0; i < thread_params_vec[exec_id]->A; ++i) {
+        if (GetBit(i, cnc_check_auths)) {
+          check_auth_ids[current_check_auth_num] = exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A) + thread_params_vec[exec_id]->auth_start + i;
+          std::copy(commit_shares[exec_id][thread_params_vec[exec_id]->auth_start + i], commit_shares[exec_id][thread_params_vec[exec_id]->auth_start + i + 1], cnc_computed_shares[current_check_auth_num]);
+          if (GetBit(current_check_auth_num, auth_cnc_input)) {
+            XOR_CodeWords(cnc_computed_shares[current_check_auth_num], commit_shares[exec_id][thread_params_vec[exec_id]->delta_pos]);
+          }
+          ++current_check_auth_num;
+        } else {
+          //Only write to num_eval_auths if it is not yet filled up. Might be wasteful, but easier to handle
+          if (current_eval_auth_num < thread_params_vec[exec_id]->num_eval_auths) {
 
-//       //Receive the 2 * num_check_gates + num_check_auths CNC keys
-//       int num_checks_sent = 2 * num_check_gates + num_check_auths;
-//       std::unique_ptr<uint8_t[]> all_cnc_keys(std::make_unique<uint8_t[]>(num_checks * CSEC_BYTES));
+            uint32_t target_pos = permuted_eval_auths_ids[thread_params_vec[exec_id]->num_eval_auths * exec_id + current_eval_auth_num];
+            std::copy(auths_data.H_0 + i * CSEC_BYTES, auths_data.H_0 + i * CSEC_BYTES + CSEC_BYTES, eval_auths.H_0 + target_pos * CSEC_BYTES);
+            std::copy(auths_data.H_1 + i * CSEC_BYTES, auths_data.H_1 + i * CSEC_BYTES + CSEC_BYTES, eval_auths.H_1 + target_pos * CSEC_BYTES);
 
-//       thread_params->chan.ReceiveBlocking(all_cnc_keys.get(), num_checks_sent * CSEC_BYTES);
+            //Write the actual auth ID to eval_gates_ids in target_pos, which is determined by permuted_eval_auths_ids
+            eval_auths_ids[target_pos] = exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A) + thread_params_vec[exec_id]->auth_start + i;
+          } else {
+            //Development dirty check. Can be deleted once we have computed the correct slack bounds in params.
+            filled_eval_auths = true;
+          }
 
-//       GarblingHandler gh(*thread_params);
-//       gh.OutputShiftEvaluateGates(gates_data, 0, all_cnc_keys.get() + num_check_auths * CSEC_BYTES, all_cnc_keys.get() + (num_check_auths + num_check_gates) * CSEC_BYTES, all_cnc_keys.get() + (num_check_auths + 2 * num_check_gates) * CSEC_BYTES, check_gate_ids.get(), num_check_gates, exec_id * (thread_params->Q + thread_params->A));
+          ++current_eval_auth_num;
+        }
+      }
 
-//       //Verify the received authenticators
-//       if (!gh.VerifyAuths(auths_data, 0, all_cnc_keys.get(), check_auth_ids.get(), num_check_auths, exec_id * (thread_params->Q + thread_params->A))) {
-//         std::cout << "Auth eval failure!" << std::endl;
-//         *ver_success = false;
-//       };
+      //Now for the gates
+      std::unique_ptr<uint32_t[]> check_gate_ids(std::make_unique<uint32_t[]>(num_check_gates));
 
-//       //Start decommit phase using the above-created indices
-//       auto cnc_batch_decommit_begin = GET_TIME();
-//       if (!commit_rec->BatchDecommit(cnc_computed_shares.get(), num_checks, all_cnc_keys.get())) { //
-//         std::cout << "Wrong keys sent!" << std::endl;
-//         *ver_success = false;
-//       }
-//       auto cnc_end = GET_TIME();
-//       durations[EVAL_CNC_TIME][exec_id] = cnc_end - cnc_begin;
+      bool filled_eval_gates = false;
+      int current_check_gate_num = 0;
+      int current_eval_gate_num = 0;
+      for (uint32_t i = 0; i < thread_params_vec[exec_id]->Q; ++i) {
+        if (GetBit(i, cnc_check_gates.get())) {
+          check_gate_ids[current_check_gate_num] = exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A) + thread_params_vec[exec_id]->out_keys_start + i;
+
+          //Left
+          std::copy(commit_shares[exec_id][thread_params_vec[exec_id]->left_keys_start + i], commit_shares[exec_id][thread_params_vec[exec_id]->left_keys_start + i + 1], cnc_computed_shares[num_check_auths + current_check_gate_num]);
+          if (GetBit(current_check_gate_num, left_cnc_input.get())) {
+            XOR_CodeWords(cnc_computed_shares[num_check_auths + current_check_gate_num], commit_shares[exec_id][thread_params_vec[exec_id]->delta_pos]);
+          }
+          //Right
+          std::copy(commit_shares[exec_id][thread_params_vec[exec_id]->right_keys_start + i], commit_shares[exec_id][thread_params_vec[exec_id]->right_keys_start + i + 1], cnc_computed_shares[num_check_auths + num_check_gates + current_check_gate_num]);
+          if (GetBit(current_check_gate_num, right_cnc_input)) {
+            XOR_CodeWords(cnc_computed_shares[num_check_auths + num_check_gates + current_check_gate_num], commit_shares[exec_id][thread_params_vec[exec_id]->delta_pos]);
+          }
+          //Out
+          std::copy(commit_shares[exec_id][thread_params_vec[exec_id]->out_keys_start + i], commit_shares[exec_id][thread_params_vec[exec_id]->out_keys_start + i + 1], cnc_computed_shares[num_check_auths + 2 * num_check_gates + current_check_gate_num]);
+
+          if (GetBit(current_check_gate_num, out_cnc_input)) {
+            XOR_CodeWords(cnc_computed_shares[num_check_auths + 2 * num_check_gates + current_check_gate_num], commit_shares[exec_id][thread_params_vec[exec_id]->delta_pos]);
+          }
+          ++current_check_gate_num;
+        } else {
+          //Only write to num_eval_gates if it is not yet filled up. Might be wasteful, but easier to handle
+          if (current_eval_gate_num < thread_params_vec[exec_id]->num_eval_gates) {
+
+            int target_pos = permuted_eval_gates_ids[thread_params_vec[exec_id]->num_eval_gates * exec_id + current_eval_gate_num];
+            std::copy(gates_data.T_G + i * CSEC_BYTES, gates_data.T_G + i * CSEC_BYTES + CSEC_BYTES, eval_gates.T_G + target_pos * CSEC_BYTES);
+            std::copy(gates_data.T_E + i * CSEC_BYTES, gates_data.T_E + i * CSEC_BYTES + CSEC_BYTES, eval_gates.T_E + target_pos * CSEC_BYTES);
+            std::copy(gates_data.S_O + i * CSEC_BYTES, gates_data.S_O + i * CSEC_BYTES + CSEC_BYTES, eval_gates.S_O + target_pos * CSEC_BYTES);
+
+            //Write the actual gate ID to eval_gates_ids in target_pos, which is determined by permuted_eval_gates_ids
+            eval_gates_ids[target_pos] = exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A) + thread_params_vec[exec_id]->out_keys_start + i;
+          } else {
+            //Development dirty check. Can be deleted once we have computed the correct slack bounds in params.
+            filled_eval_gates = true;
+          }
+
+          ++current_eval_gate_num;
+        }
+      }
+
+      //Development dirty check. Can be deleted once we have computed the correct slack bounds in params.
+      if (!filled_eval_auths) {
+        std::cout << "Exec_num: " << exec_id << " did not fill eval_auths" << std::endl;
+        *ver_success = false;
+      }
+      if (!filled_eval_gates) {
+        std::cout << "Exec_num: " << exec_id << " did not fill eval_gates" << std::endl;
+        *ver_success = false;
+      }
+
+      //Receive the 2 * num_check_gates + num_check_auths CNC keys
+      int num_checks_sent = 2 * num_check_gates + num_check_auths;
+      BYTEArrayVector all_cnc_keys(num_checks, CSEC_BYTES);
+
+      exec_channels[exec_id]->recv(all_cnc_keys.data(), num_checks_sent * CSEC_BYTES);
+
+      GarblingHandler gh(*thread_params_vec[exec_id]);
+      gh.OutputShiftEvaluateGates(gates_data, 0, all_cnc_keys[num_check_auths], all_cnc_keys[num_check_auths + num_check_gates],
+                                  all_cnc_keys[num_check_auths + 2 * num_check_gates],
+                                  check_gate_ids.get(), num_check_gates, exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A));
+
+      //Verify the received authenticators
+      if (!gh.VerifyAuths(auths_data, 0, all_cnc_keys.data(), check_auth_ids.get(), num_check_auths, exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A))) {
+        std::cout << "Auth eval failure!" << std::endl;
+        *ver_success = false;
+      };
+
+      //Start decommit phase using the above-created indices
+      auto cnc_batch_decommit_begin = GET_TIME();
+      if (!commit_receivers[exec_id].BatchDecommit(cnc_computed_shares, all_cnc_keys, exec_rnds[exec_id], *exec_channels[exec_id], true)) { //
+        std::cout << "Wrong keys sent!" << std::endl;
+        *ver_success = false;
+      }
+      auto cnc_end = GET_TIME();
+      durations[EVAL_CNC_TIME][exec_id] = cnc_end - cnc_begin;
     });
   }
 
@@ -690,7 +693,7 @@ void TinyEvaluator::Preprocess() {
 //         *ver_success = false;
 //         std::cout << "Preprocessed soldering decommit failed" << std::endl;
 //       }
-    // });
+  // });
   // }
 
 // //Wait for all executions to finish
