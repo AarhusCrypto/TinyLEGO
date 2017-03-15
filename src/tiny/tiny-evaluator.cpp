@@ -115,36 +115,7 @@ void TinyEvaluator::Preprocess() {
   for (std::vector<std::chrono::duration<long double, std::milli>>& duration : durations) {
     duration.resize(params.num_execs);
   }
-  // auto setup_begin = GET_TIME();
 
-
-  // //Run DOT Extension.
-
-  // ot_rec.Receive();
-
-
-
-
-  // //Construct the CODEWORD_BITS ROTs necessary for commitment scheme. Need to read the bits this way as we are not sure rot_start_pos is 8-bit aligned, if it is not we cannot point at the starting bit.
-  // rot_start_pos = params.num_OT - CODEWORD_BITS;
-  // for (int i = 0; i < CODEWORD_BITS; ++i) {
-  //   if (GetBit(rot_start_pos + i, ot_rec.choices_outer.get())) {
-  //     SetBit(i, 1, rot_choices.get());
-  //   } else {
-  //     SetBit(i, 0, rot_choices.get());
-  //   }
-  // }
-
-  // //Hash away the global correlation and store in rot_seeds
-  // for (int i = 0; i < CODEWORD_BITS; ++i) {
-  //   params.crypt.hash(rot_seeds.get() + i * CSEC_BYTES, CSEC_BYTES, ot_rec.response_outer.get() + (rot_start_pos + i) * CSEC_BYTES, CSEC_BYTES);
-  // }
-
-  // auto dot_end = GET_TIME();
-
-// #ifdef TINY_PRINT
-//   PRINT_TIME(dot_end, dot_begin, "DOT");
-// #endif
   //=============================Run Commit====================================
   //Containers for holding pointers to objects used in each exec. For future use
   std::vector<std::future<void>> cnc_execs_finished(params.num_execs);
@@ -199,7 +170,7 @@ void TinyEvaluator::Preprocess() {
     int thread_num_pre_gates = gates_to[exec_id] - gates_from[exec_id];
 
     //Need to create a new params for each execution with the correct num_pre_gates and num_pre_inputs. The exec_id value decides which channel the execution is communicating on, so must match the constructor execution.
-    thread_params_vec.emplace_back(std::make_unique<Params>(thread_num_pre_gates, thread_num_pre_inputs, thread_num_pre_outputs, params.num_execs, exec_id));
+    thread_params_vec.emplace_back(std::make_unique<Params>(params, thread_num_pre_gates, thread_num_pre_inputs, thread_num_pre_outputs, exec_id));
 
     // Params* thread_params = thread_params_vec[exec_id].get();
 
@@ -228,7 +199,6 @@ void TinyEvaluator::Preprocess() {
       uint32_t num_commits = thread_params_vec[exec_id]->num_garbled_wires + thread_params_vec[exec_id]->num_pre_outputs + num_ots;
 
       BYTEArrayVector input_masks(num_ots, CSEC_BYTES);
-      BYTEArrayVector input_masks_choices(BITS_TO_BYTES(num_ots), 1);
 
       std::vector<osuCrypto::block> msgs(num_ots);
       osuCrypto::BitVector dot_choice(num_ots);
@@ -238,7 +208,6 @@ void TinyEvaluator::Preprocess() {
 
       for (int i = 0; i < num_ots; ++i) {
         _mm_storeu_si128((__m128i*) input_masks[i], msgs[i]);
-        SetBit(i, dot_choice[i], input_masks_choices.data());
       }
 
       auto dot_end = GET_TIME();
@@ -263,15 +232,18 @@ void TinyEvaluator::Preprocess() {
       //Put global_delta from OTs in delta_pos of commitment scheme. For security reasons we only do this in exec_num 0, as else a malicious sender might send different delta values in each threaded execution. Therefore only exec_num 0 gets a correction and the rest simply update their delta pointer to point into exec_num 0's delta value.
       std::condition_variable& delta_received_cond_val = std::get<1>(delta_checks);
       bool& delta_received = std::get<2>(delta_checks);
+      bool delta_flipped = false;
+
       if (exec_id == 0) {
-        uint8_t correction_commit_delta[CODEWORD_BYTES];
-        exec_channels[exec_id]->recv(correction_commit_delta, CODEWORD_BYTES);
+        uint8_t correction_commit_delta[CODEWORD_BYTES + 1];
+        exec_channels[exec_id]->recv(correction_commit_delta, CODEWORD_BYTES + 1);
 
         for (int i = 0; i < CODEWORD_BYTES; ++i) {
           commit_shares[exec_id][thread_params_vec[exec_id]->delta_pos][i] ^= (correction_commit_delta[i] & commit_seed_choices.data()[i]);
         }
 
         delta_received = true;
+        delta_flipped = correction_commit_delta[CODEWORD_BYTES];
         delta_received_cond_val.notify_all();
 
       } else {
@@ -287,6 +259,12 @@ void TinyEvaluator::Preprocess() {
                   commit_shares[exec_id][thread_params_vec[exec_id]->delta_pos]);
       }
 
+      if (delta_flipped) {
+        for (int i = 0; i < num_ots; ++i) {
+          XORBit(127, dot_choice[i], input_masks[i]);
+        }
+      }
+
       //////////////////////////////////CNC////////////////////////////////////
       if (exec_id == 0) {
         //Send own values to sender
@@ -296,7 +274,7 @@ void TinyEvaluator::Preprocess() {
         std::copy(input_masks[thread_params_vec[exec_id]->num_pre_inputs], input_masks[num_ots], cnc_ot_values.data());
 
         for (int i = 0; i < SSEC; ++i) {
-          if (GetBit((thread_params_vec[exec_id]->num_pre_inputs + i), input_masks_choices.data())) {
+          if (dot_choice[thread_params_vec[exec_id]->num_pre_inputs + i]) {
             SetBit(i, 1, ot_delta_cnc_choices);
           } else {
             SetBit(i, 0, ot_delta_cnc_choices);
@@ -430,6 +408,7 @@ void TinyEvaluator::Preprocess() {
           if (current_eval_auth_num < thread_params_vec[exec_id]->num_eval_auths) {
 
             uint32_t target_pos = permuted_eval_auths_ids[thread_params_vec[exec_id]->num_eval_auths * exec_id + current_eval_auth_num];
+
             std::copy(auths_data.H_0 + i * CSEC_BYTES, auths_data.H_0 + i * CSEC_BYTES + CSEC_BYTES, eval_auths.H_0 + target_pos * CSEC_BYTES);
             std::copy(auths_data.H_1 + i * CSEC_BYTES, auths_data.H_1 + i * CSEC_BYTES + CSEC_BYTES, eval_auths.H_1 + target_pos * CSEC_BYTES);
 
@@ -502,10 +481,10 @@ void TinyEvaluator::Preprocess() {
       }
 
       //Receive the 2 * num_check_gates + num_check_auths CNC keys
-      int num_checks_sent = 2 * num_check_gates + num_check_auths;
+      int num_check_keys_sent = 2 * num_check_gates + num_check_auths;
       BYTEArrayVector all_cnc_keys(num_checks, CSEC_BYTES);
 
-      exec_channels[exec_id]->recv(all_cnc_keys.data(), num_checks_sent * CSEC_BYTES);
+      exec_channels[exec_id]->recv(all_cnc_keys.data(), num_check_keys_sent * CSEC_BYTES);
 
       GarblingHandler gh(*thread_params_vec[exec_id]);
       gh.OutputShiftEvaluateGates(gates_data, 0, all_cnc_keys[num_check_auths], all_cnc_keys[num_check_auths + num_check_gates],
@@ -516,11 +495,12 @@ void TinyEvaluator::Preprocess() {
       if (!gh.VerifyAuths(auths_data, 0, all_cnc_keys.data(), check_auth_ids.get(), num_check_auths, exec_id * (thread_params_vec[exec_id]->Q + thread_params_vec[exec_id]->A))) {
         std::cout << "Auth eval failure!" << std::endl;
         *ver_success = false;
-      };
+      }
 
       //Start decommit phase using the above-created indices
       auto cnc_batch_decommit_begin = GET_TIME();
-      if (!commit_receivers[exec_id].BatchDecommit(cnc_computed_shares, all_cnc_keys, exec_rnds[exec_id], *exec_channels[exec_id], true)) { //
+      if (!commit_receivers[exec_id].BatchDecommit(cnc_computed_shares, all_cnc_keys, exec_rnds[exec_id], *exec_channels[exec_id], true)) {
+        std::cout << exec_id << std::endl;
         std::cout << "Wrong keys sent!" << std::endl;
         *ver_success = false;
       }

@@ -133,15 +133,7 @@ void TinyConstructor::Preprocess() {
     int thread_num_pre_gates = gates_to[exec_id] - gates_from[exec_id];
 
     //Need to create a new params for each execution with the correct num_pre_gates and num_pre_inputs. The exec_id value decides which channel the execution is communicating on, so must match the eval execution.
-    thread_params_vec.emplace_back(std::make_unique<Params>(thread_num_pre_gates, thread_num_pre_inputs, thread_num_pre_outputs, params.num_execs, exec_id));
-    // Params* thread_params = thread_params_vec[exec_id].get();
-
-    //We store our local state in the containers as we need to access them for future use
-    // commit_snds.emplace_back(std::make_unique<CommitSender>(*thread_params, rot_seeds0.get(), rot_seeds1));
-    // CommitSender* commit_snd = commit_snds[exec_id].get();
-
-    //The delta_holder is fixed and passed to all executions as it is in exec 0 that we commit to the global_delta and all other executions use this commitment when needed
-    // CommitSender* delta_holder = commit_snds[0].get();
+    thread_params_vec.emplace_back(std::make_unique<Params>(params, thread_num_pre_gates, thread_num_pre_inputs, thread_num_pre_outputs, exec_id));
 
     //Starts the current execution
     cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, inp_from, inp_to, &durations, tmp_auth_eval_ids, tmp_gate_eval_ids] (int id) {
@@ -192,12 +184,6 @@ void TinyConstructor::Preprocess() {
 
       SafeAsyncSend(*exec_channels[exec_id], input_mask_corrections);
 
-      // commit_snd->Commit();
-
-      // //Do chosen commit to all DOT commitments.
-      // std::vector<uint64_t> ot_chosen_start_vec(num_OT_commits);
-      // std::iota(std::begin(ot_chosen_start_vec), std::end(ot_chosen_start_vec), thread_params->ot_chosen_start);
-      // commit_snd->ChosenCommit(inp_from_pointer, ot_chosen_start_vec, num_OT_commits);
       auto commit_end = GET_TIME();
       durations[CONST_COMMIT_TIME][exec_id] = commit_end - commit_begin;
 
@@ -205,7 +191,13 @@ void TinyConstructor::Preprocess() {
       std::condition_variable& delta_updated_cond_val = std::get<1>(delta_checks);
       bool& delta_updated = std::get<2>(delta_checks);
 
+      bool flip_delta = !GetLSB(global_delta);
+      SetBit(127, 1, global_delta);
       if (exec_id == 0) {
+
+        uint8_t correction_commit_delta[CODEWORD_BYTES + 1];
+        correction_commit_delta[CODEWORD_BYTES] = flip_delta; // Must be before setting lsb(delta) = 1
+
         uint8_t current_delta[CSEC_BYTES];
         XOR_128(current_delta, commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos], commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos]);
 
@@ -215,11 +207,11 @@ void TinyConstructor::Preprocess() {
         commit_senders[exec_id].code.encode(current_delta, c);
         commit_senders[exec_id].code.encode(global_delta, c_delta);
 
-        uint8_t correction_commit_delta[CODEWORD_BYTES];
+
         XOR_128(correction_commit_delta, current_delta, global_delta);
         XOR_CheckBits(correction_commit_delta + CSEC_BYTES, c, c_delta);
 
-        exec_channels[exec_id]->asyncSendCopy(correction_commit_delta, CODEWORD_BYTES);
+        exec_channels[exec_id]->asyncSendCopy(correction_commit_delta, CODEWORD_BYTES + 1);
 
         XOR_128(commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos], commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos], global_delta);
 
@@ -387,9 +379,6 @@ void TinyConstructor::Preprocess() {
         BYTEArrayVector(num_checks, CODEWORD_BYTES),
         BYTEArrayVector(num_checks, CODEWORD_BYTES)
       };
-
-      // std::unique_ptr<uint8_t[]> cnc_decommit_shares0(std::make_unique<uint8_t[]>(2 * num_checks * CODEWORD_BYTES));
-      // uint8_t* cnc_decommit_shares1 = cnc_decommit_shares0.get() + num_checks * CODEWORD_BYTES;
 
       int current_auth_check_num = 0;
       int current_eval_auth_num = 0;
