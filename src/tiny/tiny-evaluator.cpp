@@ -187,7 +187,7 @@ void TinyEvaluator::Preprocess() {
   PermuteArray(permuted_eval_auths_ids, params.num_eval_auths, bucket_seeds + CSEC_BYTES);
 
   //store last exec_id as this execution performs the Delta-OT CnC step. This step is needed as we need to signal that the last thread execution ensures that the sender indeed committed to the global_delta used in DOT protocol. We do it in the last execution to avoid dealing with any prefix offset for all OT values, ie. we sacrifices the last SSEC OTs.
-  int last_exec_id = params.num_execs - 1;
+  
   //Variable to keep track if execution failed
   for (int exec_id = 0; exec_id < params.num_execs; ++exec_id) {
 
@@ -214,17 +214,18 @@ void TinyEvaluator::Preprocess() {
     // CommitReceiver* delta_holder = commit_recs[0].get();
 
     //Starts the current execution
-    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, ver_success, inp_from, inp_to, last_exec_id, permuted_eval_gates_ids, permuted_eval_auths_ids, &durations] (int id) {
+    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, ver_success, inp_from, inp_to, permuted_eval_gates_ids, permuted_eval_auths_ids, &durations] (int id) {
 
       auto dot_begin = GET_TIME();
 
       uint32_t num_ots;
-      if (exec_id == last_exec_id) {
+      if (exec_id == 0) {
         num_ots = thread_params_vec[exec_id]->num_pre_inputs + SSEC;
-        thread_params_vec[exec_id]->num_commits += SSEC;
       } else {
         num_ots = thread_params_vec[exec_id]->num_pre_inputs;
       }
+
+      uint32_t num_commits = thread_params_vec[exec_id]->num_garbled_wires + thread_params_vec[exec_id]->num_pre_outputs + num_ots;
 
       BYTEArrayVector input_masks(num_ots, CSEC_BYTES);
       BYTEArrayVector input_masks_choices(BITS_TO_BYTES(num_ots), 1);
@@ -245,17 +246,7 @@ void TinyEvaluator::Preprocess() {
 
       auto commit_begin = GET_TIME();
 
-      //If it's the last execution then we commit to s extra OTs as these are to be used for CNC.
-      // int num_OT_commits = inp_to - inp_from;
-      // if (exec_id == last_exec_id) {
-      //   num_OT_commits += SSEC;
-      //   thread_params_vec[exec_id]->num_commits += SSEC;
-      // }
-
-      // Do chosen commit to all DOT commitments.
-      // commit_rec->ChosenCommit(num_OT_commits);
-
-      commit_shares[exec_id] = BYTEArrayVector(thread_params_vec[exec_id]->num_commits, CODEWORD_BYTES);
+      commit_shares[exec_id] = BYTEArrayVector(num_commits, CODEWORD_BYTES);
 
       if (!commit_receivers[exec_id].Commit(commit_shares[exec_id], exec_rnds[exec_id], *exec_channels[exec_id])) {
         std::cout << "Abort, key commit failed!" << std::endl;
@@ -290,13 +281,14 @@ void TinyEvaluator::Preprocess() {
         while (!delta_received) {
           delta_received_cond_val.wait(lock);
         }
+
         std::copy(commit_shares[0][thread_params_vec[0]->delta_pos],
                   commit_shares[0][thread_params_vec[0]->delta_pos + 1],
                   commit_shares[exec_id][thread_params_vec[exec_id]->delta_pos]);
       }
 
-      //////////////////////////////////////CNC////////////////////////////////////
-      if (exec_id == last_exec_id) {
+      //////////////////////////////////CNC////////////////////////////////////
+      if (exec_id == 0) {
         //Send own values to sender
         std::vector<uint8_t> cnc_ot_values(SSEC * CSEC_BYTES + SSEC_BYTES);
         uint8_t* ot_delta_cnc_choices = cnc_ot_values.data() + SSEC * CSEC_BYTES;
@@ -352,119 +344,37 @@ void TinyEvaluator::Preprocess() {
         XOR_128(input_mask_corrections[i], input_masks[i]); // turns input_mask_corrections[i] into committed value
       }
 
-      // //If in the last execution we do CNC on the global_delta to ensure that this is indeed the global delta used in DOT as well
-      // if (exec_id == last_exec_id) {
+      // //===========================VER_LEAK====================================
+      auto verleak_begin = GET_TIME();
 
-      //   //Send own OT value for the last s OTs + own OT choice-bit
-      //   std::unique_ptr<uint8_t[]> cnc_ot_values(std::make_unique<uint8_t[]>(SSEC * CSEC_BYTES + SSEC_BYTES));
-      //   std::copy(ot_rec.response_outer.get() + inp_to * CSEC_BYTES, ot_rec.response_outer.get() + inp_to * CSEC_BYTES + SSEC * CSEC_BYTES, cnc_ot_values.get());
-      //   uint8_t* delta_ot_cnc_choices = cnc_ot_values.get() + SSEC * CSEC_BYTES;
-      //   for (int i = 0; i < SSEC; ++i) {
-      //     if (GetBit((inp_to + i), ot_rec.choices_outer.get())) {
-      //       SetBit(i, 1, delta_ot_cnc_choices);
-      //     } else {
-      //       SetBit(i, 0, delta_ot_cnc_choices);
-      //     }
-      //   }
-      //   thread_params->chan.Send(cnc_ot_values.get(),  SSEC * CSEC_BYTES + SSEC_BYTES);
+      auto verleak_end = GET_TIME();
+      durations[EVAL_VERLEAK_TIME][exec_id] = verleak_end - verleak_begin;
+      
+      // //==========================Receive Gates===============================
+      // auto receive_gates_auths_begin = GET_TIME();
 
-      //   //Build decommit info
-      //   std::unique_ptr<uint8_t[]> OT_decomitted_values(std::make_unique<uint8_t[]>(SSEC * CSEC_BYTES));
-      //   std::unique_ptr<uint8_t[]> chosen_computed_shares(std::make_unique<uint8_t[]>(SSEC * CODEWORD_BYTES));
+      // //Sample the seed used to determine all CNC challenges
+      // uint8_t cnc_seed[CSEC_BYTES];
+      // thread_params->rnd.GenRnd(cnc_seed, CSEC_BYTES);
 
-      //   for (int i = 0; i < SSEC; ++i) {
-      //     int commit_id = thread_params->ot_chosen_start + num_OT_commits - SSEC + i;
-      //     std::copy(commit_rec->commit_shares[commit_id], commit_rec->commit_shares[commit_id] + CODEWORD_BYTES, chosen_computed_shares.get() + i * CODEWORD_BYTES);
-      //     if (GetBit(i, delta_ot_cnc_choices)) {
-      //       XOR_CodeWords(chosen_computed_shares.get() + i * CODEWORD_BYTES, commit_rec->commit_shares[thread_params->delta_pos]);
-      //     }
-      //   }
+      // //Receive all garbling data. When received we send the CNC challenge seed
+      // std::unique_ptr<uint8_t[]> raw_garbling_data(std::make_unique<uint8_t[]>(3 * thread_params->Q * CSEC_BYTES + 2 * thread_params->A * CSEC_BYTES));
+      // thread_params->chan.ReceiveBlocking(raw_garbling_data.get(), 3 * thread_params->Q * CSEC_BYTES + 2 * thread_params->A * CSEC_BYTES);
 
-      //   std::vector<uint64_t> chosen_decommit_pos(SSEC);
-      //   std::iota(std::begin(chosen_decommit_pos), std::end(chosen_decommit_pos), num_OT_commits - SSEC);
+      // thread_params->chan.Send(cnc_seed, CSEC_BYTES);
 
-      //   if (commit_rec->ChosenDecommit(chosen_computed_shares.get(), OT_decomitted_values.get(), chosen_decommit_pos, SSEC)) {
-      //     for (int i = 0; i < SSEC; ++i) {
-      //       uint8_t* own_ot = ot_rec.response_outer.get() + inp_to * CSEC_BYTES + i * CSEC_BYTES;
-      //       uint8_t* decom_ot = OT_decomitted_values.get() + i * CSEC_BYTES;
-      //       if (!std::equal(own_ot, own_ot + CSEC_BYTES, decom_ot)) {
-      //         std::cout << "Sender cheating in OT CNC. Decomitted to wrong values!" << std::endl;
-      //         *ver_success = false;
-      //       }
-      //     }
-      //   } else {
-      //     std::cout << "Sender cheating in OT CNC. Decommit failed!" << std::endl;
-      //     *ver_success = false;
-      //   }
-      // }
+      // //Assign pointers to the garbling data. Doing this relatively for clarity
+      // HalfGates gates_data;
+      // gates_data.T_G = raw_garbling_data.get();
+      // gates_data.T_E = gates_data.T_G + thread_params->Q * CSEC_BYTES;
+      // gates_data.S_O = gates_data.T_E + thread_params->Q * CSEC_BYTES;
 
-//       //===========================VER_LEAK====================================
-//       auto verleak_begin = GET_TIME();
-//       int num_verleaks = thread_params->num_pre_outputs + thread_params->num_pre_inputs;
+      // Auths auths_data;
+      // auths_data.H_0 = gates_data.S_O + thread_params->Q * CSEC_BYTES;
+      // auths_data.H_1 = auths_data.H_0 + thread_params->A * CSEC_BYTES;
 
-//       std::unique_ptr<uint8_t[]> verleak_computed_shares(std::make_unique<uint8_t[]>((num_verleaks + AES_BITS) * CODEWORD_BYTES + BITS_TO_BYTES(num_verleaks + AES_BITS)));
-//       for (int i = 0; i < num_verleaks; ++i) {
-//         std::copy(commit_rec->commit_shares[thread_params->out_lsb_blind_start + i], commit_rec->commit_shares[thread_params->out_lsb_blind_start + i] + CODEWORD_BYTES, verleak_computed_shares.get() + i * CODEWORD_BYTES);
-//       }
-
-//       for (int i = 0; i < AES_BITS; ++i) {
-//         std::copy(commit_rec->commit_shares[thread_params->lsb_blind_start + i], commit_rec->commit_shares[thread_params->lsb_blind_start + i] + CODEWORD_BYTES, verleak_computed_shares.get() + (num_verleaks + i) * CODEWORD_BYTES);
-//       }
-
-//       uint8_t* local_verleak_bits = verleak_computed_shares.get() + (num_verleaks + AES_BITS) * CODEWORD_BYTES;
-//       thread_params->chan.ReceiveBlocking(local_verleak_bits, BITS_TO_BYTES(num_verleaks + AES_BITS));
-
-//       if (!BatchDecommitLSB(commit_rec, verleak_computed_shares.get(), num_verleaks + AES_BITS, local_verleak_bits)) {
-//         std::cout << "VerLeak Failed!" << std::endl;
-//         *ver_success = false;
-//       }
-
-//       //Update and check the ver_leak bits for the input masking values
-//       for (int i = 0; i < thread_params->num_pre_inputs; ++i) {
-//         XORBit(thread_params->num_pre_outputs + i, GetLSB(commit_rec->chosen_commit_values.get() + i * CSEC_BYTES), local_verleak_bits);
-
-//         //When done use the last num_pre_inputs bits in a verification step involving outer_response and outer_choice from the OT. This will catch if sender did not commit to the 0-value.
-//         if ((GetLSB(ot_rec.response_outer.get() + (inp_from + i) * CSEC_BYTES) ^ GetBit(inp_from + i, ot_rec.choices_outer.get())) != (GetBit(thread_params->num_pre_outputs + i, local_verleak_bits))) {
-//           std::cout << "Wrong lsb values sent!" << std::endl;
-//           *ver_success = false;
-//         }
-//       }
-
-//       //Write to global ver_leak array
-//       for (int i = 0; i < thread_params->num_pre_outputs; ++i) {
-//         SetBit(exec_id * thread_params->num_pre_outputs + i, GetBit(i, local_verleak_bits), verleak_bits.get());
-//       }
-
-//       for (int i = 0; i < thread_params->num_pre_inputs; ++i) {
-//         SetBit(params.num_pre_outputs + exec_id * thread_params->num_pre_inputs + i, GetBit(thread_params->num_pre_outputs + i, local_verleak_bits), verleak_bits.get());
-//       }
-//       auto verleak_end = GET_TIME();
-//       durations[EVAL_VERLEAK_TIME][exec_id] = verleak_end - verleak_begin;
-//       //==========================Receive Gates===============================
-//       auto receive_gates_auths_begin = GET_TIME();
-
-//       //Sample the seed used to determine all CNC challenges
-//       uint8_t cnc_seed[CSEC_BYTES];
-//       thread_params->rnd.GenRnd(cnc_seed, CSEC_BYTES);
-
-//       //Receive all garbling data. When received we send the CNC challenge seed
-//       std::unique_ptr<uint8_t[]> raw_garbling_data(std::make_unique<uint8_t[]>(3 * thread_params->Q * CSEC_BYTES + 2 * thread_params->A * CSEC_BYTES));
-//       thread_params->chan.ReceiveBlocking(raw_garbling_data.get(), 3 * thread_params->Q * CSEC_BYTES + 2 * thread_params->A * CSEC_BYTES);
-
-//       thread_params->chan.Send(cnc_seed, CSEC_BYTES);
-
-//       //Assign pointers to the garbling data. Doing this relatively for clarity
-//       HalfGates gates_data;
-//       gates_data.T_G = raw_garbling_data.get();
-//       gates_data.T_E = gates_data.T_G + thread_params->Q * CSEC_BYTES;
-//       gates_data.S_O = gates_data.T_E + thread_params->Q * CSEC_BYTES;
-
-//       Auths auths_data;
-//       auths_data.H_0 = gates_data.S_O + thread_params->Q * CSEC_BYTES;
-//       auths_data.H_1 = auths_data.H_0 + thread_params->A * CSEC_BYTES;
-
-//       auto receive_gates_auths_end = GET_TIME();
-//       durations[EVAL_RECEIVE_GATES_AUTHS_TIME][exec_id] = receive_gates_auths_end - receive_gates_auths_begin;
+      // auto receive_gates_auths_end = GET_TIME();
+      // durations[EVAL_RECEIVE_GATES_AUTHS_TIME][exec_id] = receive_gates_auths_end - receive_gates_auths_begin;
 
 //       //========================Run Cut-and-Choose=============================
 //       auto cnc_begin = GET_TIME();

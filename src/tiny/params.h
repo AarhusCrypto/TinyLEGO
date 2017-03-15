@@ -57,10 +57,6 @@ public:
   uint64_t lsb_blind_start;
   uint64_t out_lsb_blind_start;
 
-
-  //Number indicators
-  uint64_t num_commits;
-
   //Non-Protocol related
   int num_cpus;
   int num_execs;

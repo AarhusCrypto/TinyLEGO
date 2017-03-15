@@ -100,25 +100,6 @@ void TinyConstructor::Preprocess() {
   }
 
   auto setup_begin = GET_TIME();
-  // auto dot_begin = GET_TIME();
-  // //Run DOT Extension.
-  // ot_snd.Send();
-  // //Pointer for global delta for convenience
-  // global_delta = ot_snd.delta_outer.get();
-
-  // //Construct the ROTs necessary for commitment scheme setup. Requires computing base_outer \xor global_delta and then hashing both values into seeds_rot to remove the correlation
-  // uint8_t base_outer_delta[CSEC_BYTES];
-  // int rot_start_pos = params.num_OT - CODEWORD_BITS;
-  // for (int i = 0; i < CODEWORD_BITS; ++i) {
-  //   XOR_128(base_outer_delta, ot_snd.base_outer.get() + (rot_start_pos + i) * CSEC_BYTES, global_delta);
-  //   params.crypt.hash(rot_seeds0.get() + i * CSEC_BYTES, CSEC_BYTES, ot_snd.base_outer.get() + (rot_start_pos + i) * CSEC_BYTES, CSEC_BYTES);
-  //   params.crypt.hash(rot_seeds1 + i * CSEC_BYTES, CSEC_BYTES, base_outer_delta, CSEC_BYTES);
-  // }
-
-  // auto dot_end = GET_TIME();
-// #ifdef TINY_PRINT
-//   PRINT_TIME(dot_end, dot_begin, "DOT");
-// #endif
   // =============================Run Commit===================================
 
   //Containers for holding pointers to objects used in each exec. For future use
@@ -142,7 +123,6 @@ void TinyConstructor::Preprocess() {
   std::tuple<std::mutex&, std::condition_variable&, bool&> delta_checks = make_tuple(std::ref(delta_updated_mutex), std::ref(delta_updated_cond_val), std::ref(delta_updated));
 
   //store last exec_id as this execution performs the Delta-OT CnC step. This step is needed to ensure that the sender indeed committed to the global_delta used in DOT protocol.
-  int last_exec_id = params.num_execs - 1;
   for (int exec_id = 0; exec_id < params.num_execs; ++exec_id) {
 
     //Assign pr. exec variables that are passed along to the current execution thread
@@ -164,17 +144,18 @@ void TinyConstructor::Preprocess() {
     // CommitSender* delta_holder = commit_snds[0].get();
 
     //Starts the current execution
-    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, inp_from, inp_to, last_exec_id, &durations, tmp_auth_eval_ids, tmp_gate_eval_ids] (int id) {
+    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, inp_from, inp_to, &durations, tmp_auth_eval_ids, tmp_gate_eval_ids] (int id) {
 
       auto dot_begin = GET_TIME();
 
       uint32_t num_ots;
-      if (exec_id == last_exec_id) {
+      if (exec_id == 0) {
         num_ots = thread_params_vec[exec_id]->num_pre_inputs + SSEC;
-        thread_params_vec[exec_id]->num_commits += SSEC;
       } else {
         num_ots = thread_params_vec[exec_id]->num_pre_inputs;
       }
+
+      uint32_t num_commits = thread_params_vec[exec_id]->num_garbled_wires + thread_params_vec[exec_id]->num_pre_outputs + num_ots;
 
       BYTEArrayVector input_masks(num_ots, CSEC_BYTES);
       std::vector<std::array<osuCrypto::block, 2>> msgs(num_ots);
@@ -182,6 +163,8 @@ void TinyConstructor::Preprocess() {
       dot_senders[exec_id]->send(msgs, exec_rnds[exec_id], *exec_channels[exec_id]);
 
       osuCrypto::block block_delta = msgs[0][0] ^ msgs[0][1];
+      uint8_t global_delta[CSEC_BYTES] = {0};
+
       _mm_storeu_si128((__m128i*) global_delta, block_delta);
 
       for (int i = 0; i < num_ots; ++i) {
@@ -194,8 +177,8 @@ void TinyConstructor::Preprocess() {
       auto commit_begin = GET_TIME();
 
       commit_shares[exec_id] = {
-        BYTEArrayVector(thread_params_vec[exec_id]->num_commits, CODEWORD_BYTES),
-        BYTEArrayVector(thread_params_vec[exec_id]->num_commits, CODEWORD_BYTES)
+        BYTEArrayVector(num_commits, CODEWORD_BYTES),
+        BYTEArrayVector(num_commits, CODEWORD_BYTES)
       };
 
       commit_senders[exec_id].Commit(commit_shares[exec_id], *exec_channels[exec_id]);
@@ -226,8 +209,8 @@ void TinyConstructor::Preprocess() {
         uint8_t current_delta[CSEC_BYTES];
         XOR_128(current_delta, commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos], commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos]);
 
-        uint8_t c[2 * BCH_BYTES] = {0};
-        uint8_t* c_delta = c + BCH_BYTES;
+        uint8_t c[(CODEWORD_BYTES - CSEC_BYTES)] = {0};
+        uint8_t c_delta[(CODEWORD_BYTES - CSEC_BYTES)] = {0};
 
         commit_senders[exec_id].code.encode(current_delta, c);
         commit_senders[exec_id].code.encode(global_delta, c_delta);
@@ -239,6 +222,7 @@ void TinyConstructor::Preprocess() {
         exec_channels[exec_id]->asyncSendCopy(correction_commit_delta, CODEWORD_BYTES);
 
         XOR_128(commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos], commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos], global_delta);
+
         XOR_CheckBits(commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos] + CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos] + CSEC_BYTES, c_delta);
 
         delta_updated = true;
@@ -246,120 +230,65 @@ void TinyConstructor::Preprocess() {
 
 
       } else {
-
         std::mutex& delta_updated_mutex = std::get<0>(delta_checks);
         std::unique_lock<std::mutex> lock(delta_updated_mutex);
         while (!delta_updated) {
           delta_updated_cond_val.wait(lock);
         }
+
         std::copy(commit_shares[0][0][thread_params_vec[exec_id]->delta_pos],
-          commit_shares[0][0][thread_params_vec[exec_id]->delta_pos + 1],
-          commit_shares[0][exec_id][thread_params_vec[exec_id]->delta_pos]);
-        std::copy(commit_shares[1][0][thread_params_vec[exec_id]->delta_pos],
-          commit_shares[1][0][thread_params_vec[exec_id]->delta_pos + 1],
-          commit_shares[1][exec_id][thread_params_vec[exec_id]->delta_pos]);
+                  commit_shares[0][0][thread_params_vec[exec_id]->delta_pos + 1],
+                  commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos]);
+        std::copy(commit_shares[0][1][thread_params_vec[exec_id]->delta_pos],
+                  commit_shares[0][1][thread_params_vec[exec_id]->delta_pos + 1],
+                  commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos]);
       }
 
-      //////////////////////////////////////CNC////////////////////////////////////
-  if (exec_id == last_exec_id) {
+      //////////////////////////////////CNC////////////////////////////////////
+      if (exec_id == 0) {
 
-    //Receive values from receiver and check that they are valid OTs. In the same loop we also build the decommit information.
-    std::vector<uint8_t> cnc_ot_values(SSEC * CSEC_BYTES + SSEC_BYTES);
-    exec_channels[exec_id]->recv(cnc_ot_values.data(),  SSEC * CSEC_BYTES + SSEC_BYTES);
-    uint8_t* ot_delta_cnc_choices = cnc_ot_values.data() + SSEC * CSEC_BYTES;
+        //Receive values from receiver and check that they are valid OTs. In the same loop we also build the decommit information.
+        std::vector<uint8_t> cnc_ot_values(SSEC * CSEC_BYTES + SSEC_BYTES);
+        exec_channels[exec_id]->recv(cnc_ot_values.data(),  SSEC * CSEC_BYTES + SSEC_BYTES);
+        uint8_t* ot_delta_cnc_choices = cnc_ot_values.data() + SSEC * CSEC_BYTES;
 
-    uint8_t correct_ot_value[CSEC_BYTES];
-    std::array<BYTEArrayVector, 2> chosen_decommit_shares = {
-      BYTEArrayVector(SSEC, CODEWORD_BYTES),
-      BYTEArrayVector(SSEC, CODEWORD_BYTES)
-    };
+        uint8_t correct_ot_value[CSEC_BYTES];
+        std::array<BYTEArrayVector, 2> chosen_decommit_shares = {
+          BYTEArrayVector(SSEC, CODEWORD_BYTES),
+          BYTEArrayVector(SSEC, CODEWORD_BYTES)
+        };
 
-    for (int i = 0; i < SSEC; ++i) {
-      std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i], commit_shares[exec_id][0][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i + 1], chosen_decommit_shares[0][i]);
-      std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i + 1], chosen_decommit_shares[1][i]);
-      
-      std::copy(input_masks[thread_params_vec[exec_id]->num_pre_inputs + i], input_masks[thread_params_vec[exec_id]->num_pre_inputs + i + 1], correct_ot_value);
+        for (int i = 0; i < SSEC; ++i) {
+          std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i], commit_shares[exec_id][0][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i + 1], chosen_decommit_shares[0][i]);
+          std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i], commit_shares[exec_id][1][thread_params_vec[exec_id]->ot_chosen_start + thread_params_vec[exec_id]->num_pre_inputs + i + 1], chosen_decommit_shares[1][i]);
 
-      if (GetBit(i, ot_delta_cnc_choices)) {
+          std::copy(input_masks[thread_params_vec[exec_id]->num_pre_inputs + i], input_masks[thread_params_vec[exec_id]->num_pre_inputs + i + 1], correct_ot_value);
 
-        XOR_CodeWords(chosen_decommit_shares[0][i], commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos]);
-        XOR_CodeWords(chosen_decommit_shares[1][i], commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos]);
-        
-        XOR_128(correct_ot_value, global_delta);
+          if (GetBit(i, ot_delta_cnc_choices)) {
+
+            XOR_CodeWords(chosen_decommit_shares[0][i], commit_shares[exec_id][0][thread_params_vec[exec_id]->delta_pos]);
+            XOR_CodeWords(chosen_decommit_shares[1][i], commit_shares[exec_id][1][thread_params_vec[exec_id]->delta_pos]);
+
+            XOR_128(correct_ot_value, global_delta);
+          }
+
+          if (!std::equal(correct_ot_value, correct_ot_value + CSEC_BYTES,  cnc_ot_values.data() + i * CSEC_BYTES)) {
+            std::cout << "Receiver cheating. Trying to make us open to wrong OT!" << std::endl;
+            throw std::runtime_error("Receiver cheating. Trying to make us open to wrong OT!");
+          }
+        }
+        std::cout << exec_id << std::endl;
+        //As receiver sent correct input masks, we now decommit to the same values. Will prove that sender indeed comitted to Delta
+        commit_senders[exec_id].Decommit(chosen_decommit_shares, *exec_channels[exec_id]);
       }
+      //////////////////////////////////CNC////////////////////////////////////
 
-      if (!std::equal(correct_ot_value, correct_ot_value + CSEC_BYTES,  cnc_ot_values.data() + i * CSEC_BYTES)) {
-        std::cout << "Receiver cheating. Trying to make us open to wrong OT!" << std::endl;
-        throw std::runtime_error("Receiver cheating. Trying to make us open to wrong OT!");
-      }
-    }
+      //===========================VER_LEAK====================================
+      auto verleak_begin = GET_TIME();
 
-    //As receiver sent correct input masks, we now decommit to the same values. Will prove that sender indeed comitted to Delta
-    commit_senders[exec_id].Decommit(chosen_decommit_shares, *exec_channels[exec_id]);
-  }
-  //////////////////////////////////////CNC////////////////////////////////////
+      auto verleak_end = GET_TIME();
+      durations[CONST_VERLEAK_TIME][exec_id] = verleak_end - verleak_begin;
 
-      // //If in the last execution we do CNC on the global_delta to ensure that this is indeed the global delta used in DOT as well
-      // if (exec_id == last_exec_id) {
-      //   std::unique_ptr<uint8_t[]> cnc_ot_values(std::make_unique<uint8_t[]>(SSEC * CSEC_BYTES + SSEC_BYTES));
-      //   thread_params->chan.ReceiveBlocking(cnc_ot_values.get(), SSEC * CSEC_BYTES + SSEC_BYTES);
-      //   uint8_t* cnc_ot_choices = cnc_ot_values.get() + SSEC * CSEC_BYTES;
-
-      //   //First test that receiver has sent valid OTs is trying to cheat. In the same loop we also build the decommit information.
-      //   uint8_t correct_ot_value[CSEC_BYTES];
-
-      //   std::unique_ptr<uint8_t[]> chosen_decommit_shares0(std::make_unique<uint8_t[]>(SSEC * (CODEWORD_BYTES + CSEC_BYTES)));
-      //   uint8_t* chosen_decommit_shares1 = chosen_decommit_shares0.get() + SSEC * CODEWORD_BYTES;
-
-      //   for (int i = 0; i < SSEC; ++i) {
-      //     int commit_id = thread_params->ot_chosen_start + num_OT_commits - SSEC + i;
-      //     std::copy(commit_snd->commit_shares0[commit_id], commit_snd->commit_shares0[commit_id] + CODEWORD_BYTES, chosen_decommit_shares0.get() + i * CODEWORD_BYTES);
-      //     std::copy(commit_snd->commit_shares1[commit_id], commit_snd->commit_shares1[commit_id] + CSEC_BYTES, chosen_decommit_shares1 + i * CSEC_BYTES);
-      //     if (GetBit(i, cnc_ot_choices)) {
-
-      //       XOR_128(correct_ot_value, ot_snd.base_outer.get() + (inp_to + i) * CSEC_BYTES, global_delta);
-
-      //       XOR_CodeWords(chosen_decommit_shares0.get() + i * CODEWORD_BYTES, commit_snd->commit_shares0[thread_params->delta_pos]);
-      //       XOR_128(chosen_decommit_shares1 + i * CSEC_BYTES, commit_snd->commit_shares1[thread_params->delta_pos]);
-
-      //     } else {
-      //       std::copy(ot_snd.base_outer.get() + (inp_to + i) * CSEC_BYTES, ot_snd.base_outer.get() + (inp_to + i) * CSEC_BYTES + CSEC_BYTES, correct_ot_value);
-      //     }
-      //     if (!equal(correct_ot_value, correct_ot_value + CSEC_BYTES,  cnc_ot_values.get() + i * CSEC_BYTES)) {
-      //       throw std::runtime_error("Receiver cheating. Trying to make us open to wrong OT!");
-      //     }
-      //   }
-
-      //   //ChosenDecommit
-      //   thread_params->chan.Send(chosen_decommit_shares0.get(), SSEC * (CODEWORD_BYTES + CSEC_BYTES));
-      // }
-
-      // //===========================VER_LEAK====================================
-      // auto verleak_begin = GET_TIME();
-      // int num_verleaks = thread_params->num_pre_outputs + thread_params->num_pre_inputs;
-
-      // std::unique_ptr<uint8_t[]> verleak_decommit_shares0(std::make_unique<uint8_t[]>(2 * (num_verleaks + AES_BITS) * CODEWORD_BYTES + BITS_TO_BYTES((num_verleaks + AES_BITS))));
-
-      // uint8_t* verleak_decommit_shares1 = verleak_decommit_shares0.get() + (num_verleaks + AES_BITS) * CODEWORD_BYTES;
-      // uint8_t* verleak_bits = verleak_decommit_shares1 + (num_verleaks + AES_BITS) * CODEWORD_BYTES;
-      // for (int i = 0; i < num_verleaks; ++i) {
-      //   std::copy(commit_snd->commit_shares0[thread_params->out_lsb_blind_start + i], commit_snd->commit_shares0[thread_params->out_lsb_blind_start + i] + CODEWORD_BYTES, verleak_decommit_shares0.get() + i * CODEWORD_BYTES);
-      //   std::copy(commit_snd->commit_shares1[thread_params->out_lsb_blind_start + i], commit_snd->commit_shares1[thread_params->out_lsb_blind_start + i] + CODEWORD_BYTES, verleak_decommit_shares1 + i * CODEWORD_BYTES);
-      //   SetBit(i, GetLSB(commit_snd->commit_shares0[thread_params->out_lsb_blind_start + i]), verleak_bits);
-      //   XORBit(i, GetLSB(commit_snd->commit_shares1[thread_params->out_lsb_blind_start + i]), verleak_bits);
-      // }
-
-      // for (int i = 0; i < AES_BITS; ++i) {
-      //   std::copy(commit_snd->commit_shares0[thread_params->lsb_blind_start + i], commit_snd->commit_shares0[thread_params->lsb_blind_start + i] + CODEWORD_BYTES, verleak_decommit_shares0.get() + (num_verleaks + i) * CODEWORD_BYTES);
-      //   std::copy(commit_snd->commit_shares1[thread_params->lsb_blind_start + i], commit_snd->commit_shares1[thread_params->lsb_blind_start + i] + CODEWORD_BYTES, verleak_decommit_shares1 + (num_verleaks + i) * CODEWORD_BYTES);
-      //   SetBit(num_verleaks + i, GetLSB(commit_snd->commit_shares0[thread_params->lsb_blind_start + i]), verleak_bits);
-      //   XORBit(num_verleaks + i, GetLSB(commit_snd->commit_shares1[thread_params->lsb_blind_start + i]), verleak_bits);
-      // }
-
-      // thread_params->chan.Send(verleak_bits, BITS_TO_BYTES(num_verleaks + AES_BITS));
-      // BatchDecommitLSB(commit_snd, verleak_decommit_shares0.get(), verleak_decommit_shares1, num_verleaks + AES_BITS);
-      // auto verleak_end = GET_TIME();
-      // durations[CONST_VERLEAK_TIME][exec_id] = verleak_end - verleak_begin;
       // //===========================Run Garbling================================
       // auto garbling_begin = GET_TIME();
 

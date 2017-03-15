@@ -91,17 +91,16 @@ void Params::ComputeGateAndAuthNumbers(uint64_t num_pre_gates, uint64_t num_pre_
   num_eval_auths = num_pre_gates * num_auth + num_pre_inputs * num_inp_auth;
 
   num_garbled_wires = 3 * Q + A + 1;
+  
   left_keys_start = 0;
   right_keys_start = Q;
   out_keys_start = 2 * Q;
   auth_start = 3 * Q;
   delta_pos = 3 * Q + A;
-  lsb_blind_start = 3 * Q + A + 1;
-  out_lsb_blind_start = 3 * Q + A + 1 + AES_BITS; //num_pre_outputs commits
-  ot_chosen_start = 3 * Q + A + 1 + AES_BITS + num_pre_outputs; //num_pre_inputs + s commits
+  ot_chosen_start = 3 * Q + A + 1; //num_pre_inputs + s commits
 
   // num_OT = num_pre_inputs + SSEC;
-  num_commits = num_garbled_wires + AES_BITS + num_pre_outputs + num_pre_inputs; //k commitments will be used to blind VerLeak in offline phase.
+   //k commitments will be used to blind VerLeak in offline phase.
 }
 
 void Params::ComputeCheckFractions() {

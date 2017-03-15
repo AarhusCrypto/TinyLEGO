@@ -40,7 +40,6 @@ public:
 
   uint32_t* eval_gates_ids;
   uint32_t* eval_auths_ids;
-  uint8_t global_delta[CSEC_BYTES] = {0};
 };
 
 #endif /* TINY_TINY_TINYCONST_H_ */

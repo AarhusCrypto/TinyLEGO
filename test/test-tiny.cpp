@@ -105,8 +105,8 @@ void RunEval(TinyEvaluator& tiny_eval, std::vector<Circuit*>& circuits, std::vec
 // }
 
 TEST(Protocol, AES) {
-  Params params_const(num_iters * 7000, num_iters * 256, num_iters * 128, 1);
-  Params params_eval(num_iters * 7000, num_iters * 256, num_iters * 128, 1);
+  Params params_const(num_iters * 7000, num_iters * 256, num_iters * 128, 2);
+  Params params_eval(num_iters * 7000, num_iters * 256, num_iters * 128, 2);
   
   TinyConstructor tiny_const(tiny_constant_seeds[0], params_const);
   TinyEvaluator tiny_eval(tiny_constant_seeds[1], params_eval);
