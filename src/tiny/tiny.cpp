@@ -3,7 +3,6 @@
 Tiny::Tiny(uint8_t seed[], Params& params) :
 params(params),
 thread_pool(params.num_cpus),
-thread_seeds(std::make_unique<uint8_t[]>(CSEC_BYTES * params.num_execs)),
 exec_rnds(params.num_execs),
 ios(0) {
   

@@ -41,8 +41,7 @@ public:
   osuCrypto::Channel* chan;
   std::vector<osuCrypto::Channel*> exec_channels;
 
-  std::vector<std::unique_ptr<Params>> thread_params_vec;
-  std::unique_ptr<uint8_t[]> thread_seeds;
+  std::vector<Params> thread_params_vec;
 };
 
 #endif /* TINY_TINY_TINY_H_ */
