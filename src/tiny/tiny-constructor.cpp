@@ -37,7 +37,6 @@ void TinyConstructor::Connect(std::string ip_address, uint16_t port) {
 void TinyConstructor::Setup() {
   //=========================Run DOT===========================================
   auto baseOT_begin = GET_TIME();
-  // ot_snd.InitOTSender();
 
   //BaseOTs
   osuCrypto::u64 num_base_OTs = CSEC + SSEC;
@@ -178,6 +177,7 @@ void TinyConstructor::Preprocess() {
       };
       for (int i = 0; i < num_ots; ++i) {
         std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id].ot_chosen_start + i], commit_shares[exec_id][0][thread_params_vec[exec_id].ot_chosen_start + i + 1], commit_shares_ot[0][i]);
+
         std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id].ot_chosen_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].ot_chosen_start + i + 1], commit_shares_ot[1][i]);
       }
 
@@ -215,6 +215,7 @@ void TinyConstructor::Preprocess() {
 
       bool flip_delta = !GetLSB(global_delta);
       SetBit(127, 1, global_delta);
+
       if (exec_id == 0) {
 
         uint8_t correction_commit_delta[CODEWORD_BYTES + 1];
@@ -991,12 +992,12 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
         commit_senders[exec_id].BatchDecommit(topsolder_decommit_shares, *exec_channels[exec_id], true);
 
         //Leak LSB(out_key)
-        for (int i = circuit->num_out_wires; i > 0; --i) {
-          std::copy(decommit_shares_tmp[0][circuit->num_wires - i],
-                    decommit_shares_tmp[0][circuit->num_wires - i + 1],
+        for (int i = 0; i < circuit->num_out_wires; ++i) {
+          std::copy(decommit_shares_tmp[0][circuit->num_wires - circuit->num_out_wires + i],
+                    decommit_shares_tmp[0][circuit->num_wires - circuit->num_out_wires + i + 1],
                     commit_shares_outs[0][curr_out_write_pos]);
-          std::copy(decommit_shares_tmp[1][circuit->num_wires - i],
-                    decommit_shares_tmp[1][circuit->num_wires - i + 1],
+          std::copy(decommit_shares_tmp[1][circuit->num_wires - circuit->num_out_wires + i],
+                    decommit_shares_tmp[1][circuit->num_wires - circuit->num_out_wires + i + 1],
                     commit_shares_outs[1][curr_out_write_pos]);
 
           XORBit(curr_out_write_pos,

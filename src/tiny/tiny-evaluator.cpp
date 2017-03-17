@@ -179,7 +179,8 @@ void TinyEvaluator::Preprocess() {
     // CommitReceiver* delta_holder = commit_recs[0].get();
 
     //Starts the current execution
-    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, ver_success, inp_from, inp_to, permuted_eval_gates_ids, permuted_eval_auths_ids, &durations] (int id) {
+    bool delta_flipped = false;
+    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, &delta_flipped, ver_success, inp_from, inp_to, permuted_eval_gates_ids, permuted_eval_auths_ids, &durations] (int id) {
 
       auto dot_begin = GET_TIME();
 
@@ -249,7 +250,6 @@ void TinyEvaluator::Preprocess() {
       //Put global_delta from OTs in delta_pos of commitment scheme. For security reasons we only do this in exec_num 0, as else a malicious sender might send different delta values in each threaded execution. Therefore only exec_num 0 gets a correction and the rest simply update their delta pointer to point into exec_num 0's delta value.
       std::condition_variable& delta_received_cond_val = std::get<1>(delta_checks);
       bool& delta_received = std::get<2>(delta_checks);
-      bool delta_flipped = false;
 
       if (exec_id == 0) {
         uint8_t correction_commit_delta[CODEWORD_BYTES + 1];
@@ -276,10 +276,24 @@ void TinyEvaluator::Preprocess() {
                   commit_shares[exec_id][thread_params_vec[exec_id].delta_pos]);
       }
 
+      //Store values!
+
       if (delta_flipped) {
         for (int i = 0; i < num_ots; ++i) {
           XORBit(127, dot_choices[i], input_masks[i]);
         }
+      }
+
+      uint32_t prev_inputs = 0;
+      for (int i = 0; i < exec_id; ++i) {
+        prev_inputs += thread_params_vec[i].num_pre_inputs;
+      }
+
+      for (int i = 0; i < thread_params_vec[exec_id].num_pre_inputs; ++i) {
+
+        XOR_128(global_input_masks[prev_inputs + i], input_mask_corrections[i], input_masks[i]); // turns input_mask_corrections[i] into committed value
+        global_dot_choices[prev_inputs + i] = dot_choices[i];
+        global_dot_lsb[prev_inputs + i] = GetBit(i, decommit_lsb.data());
       }
 
       //////////////////////////////////CNC////////////////////////////////////
@@ -333,18 +347,6 @@ void TinyEvaluator::Preprocess() {
         }
       }
 //////////////////////////////////////CNC////////////////////////////////////
-
-      uint32_t prev_inputs = 0;
-      for (int i = 0; i < exec_id; ++i) {
-        prev_inputs += thread_params_vec[i].num_pre_inputs;
-      }
-
-      for (int i = 0; i < thread_params_vec[exec_id].num_pre_inputs; ++i) {
-
-        XOR_128(global_input_masks[prev_inputs + i], input_mask_corrections[i], input_masks[i]); // turns input_mask_corrections[i] into committed value
-        global_dot_choices[prev_inputs + i] = dot_choices[i];
-        global_dot_lsb[prev_inputs + i] = GetBit(i, decommit_lsb.data());
-      }
 
       // //===========================VER_LEAK====================================
       auto verleak_begin = GET_TIME();
@@ -969,9 +971,9 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
         }
 
         //Leak LSB(out_key)
-        for (int i = circuit->num_out_wires; i > 0; --i) {
-          std::copy(topsolder_computed_shares_tmp[circuit->num_wires - i],
-                    topsolder_computed_shares_tmp[circuit->num_wires - i + 1],
+        for (int i = 0; i < circuit->num_out_wires; ++i) {
+          std::copy(topsolder_computed_shares_tmp[circuit->num_wires - circuit->num_out_wires + i],
+                    topsolder_computed_shares_tmp[circuit->num_wires - circuit->num_out_wires + i + 1],
                     commit_shares_outs[curr_out_write_pos]);
 
           ++curr_out_write_pos;
@@ -993,13 +995,13 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
         throw std::runtime_error("Abort, out blind lsb decommit failed!");
       }
 
-      //Todo store in global
+      //Store in global array
       uint32_t prev_outputs = 0;
-      for (int i = 0; i < exec_id; ++i) {
-        prev_outputs += thread_params_vec[i].num_pre_outputs;
+      for (int i = 0; i < circ_from; ++i) {
+        prev_outputs += circuits[i]->num_out_wires;
       }
 
-      for (int i = 0; i < thread_params.num_pre_outputs; ++i) {
+      for (int i = 0; i < num_outs_needed; ++i) {
         global_out_lsb[prev_outputs + i] = GetBit(i, decommit_lsb.data());
       }
 
