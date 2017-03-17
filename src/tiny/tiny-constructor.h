@@ -22,13 +22,6 @@ public:
   void Preprocess();
   void Offline(std::vector<Circuit*>& circuits, int top_num_execs);
   void Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs, int eval_num_execs);
-  void BatchDecommitLSB(CommitSender* commit_snd, uint8_t decommit_shares0[], uint8_t decommit_shares1[], int num_values);
-
-  //For deletion soon
-  // ALSZDOTExtSnd ot_snd;
-  // std::unique_ptr<uint8_t[]> rot_seeds0;
-  // uint8_t* rot_seeds1;
-  // std::vector<std::unique_ptr<CommitSender>> commit_snds;
 
   std::unique_ptr<uint32_t[]> raw_eval_ids;
 

@@ -27,12 +27,12 @@ void RunEval(TinyEvaluator& tiny_eval, std::vector<Circuit*>& circuits, std::vec
   tiny_eval.Offline(circuits, tiny_eval.params.num_execs);
   tiny_eval.Online(circuits, inputs, outputs_raw, tiny_eval.params.num_execs);
 
-  // for (int i = 0; i < circuits.size(); ++i) {
-  //   for (int j = 0; j < circuits[i]->num_out_wires; ++j) {
+  for (int i = 0; i < circuits.size(); ++i) {
+    for (int j = 0; j < circuits[i]->num_out_wires; ++j) {
 
-  //     ASSERT_TRUE(GetBitReversed(j, expected_output) == GetBit(j, outputs[i].get()));
-  //   }
-  // }
+      ASSERT_TRUE(GetBitReversed(j, expected_output) == GetBit(j, outputs[i].get()));
+    }
+  }
 }
 
 // TEST(Protocol, AES) {

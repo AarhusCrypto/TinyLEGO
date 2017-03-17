@@ -2,10 +2,6 @@
 
 TinyEvaluator::TinyEvaluator(uint8_t seed[], Params& params) :
   Tiny(seed, params),
-  // ot_rec(params),
-  // rot_seeds(std::make_unique<uint8_t[]>(CODEWORD_BITS * CSEC_BYTES)),
-  // rot_choices(std::make_unique<uint8_t[]>(BITS_TO_BYTES(CODEWORD_BITS))),
-  verleak_bits(std::make_unique<uint8_t[]>(BITS_TO_BYTES(params.num_pre_outputs + params.num_pre_inputs))),
   raw_eval_data(std::make_unique<uint8_t[]>(5 * CSEC_BYTES * params.num_eval_gates + 3 * CSEC_BYTES * params.num_eval_auths)),
   raw_eval_ids(std::make_unique<uint32_t[]>(params.num_eval_gates + params.num_eval_auths)),
   commit_seed_OTs(CODEWORD_BITS),
@@ -14,8 +10,8 @@ TinyEvaluator::TinyEvaluator(uint8_t seed[], Params& params) :
   commit_shares(params.num_execs),
   global_dot_choices(params.num_pre_inputs),
   global_dot_lsb(params.num_pre_inputs),
-  global_input_masks(params.num_pre_inputs, CSEC_BYTES)
-{
+  global_input_masks(params.num_pre_inputs, CSEC_BYTES),
+  global_out_lsb(params.num_pre_outputs) {
 
   //Pointers for convenience to the raw data used for storing the produced eval gates and eval auths. Each exec will write to this array in seperate positions and thus filling it completely. Needs to be computed like this to avoid overflow of evla_data_size
   eval_gates.T_G = raw_eval_data.get();
@@ -226,7 +222,7 @@ void TinyEvaluator::Preprocess() {
 
 
       BYTEArrayVector commit_shares_lsb_blind(SSEC, CODEWORD_BYTES);
-      if(!commit_receivers[exec_id].Commit(commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
+      if (!commit_receivers[exec_id].Commit(commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
         std::cout << "Abort, blind commit failed!" << std::endl;
         throw std::runtime_error("Abort, blind commit failed!");
       }
@@ -241,8 +237,8 @@ void TinyEvaluator::Preprocess() {
       }
 
 
-      if(!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_ot, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id])) {
-         std::cout << "Abort, blind lsb decommit failed!" << std::endl;
+      if (!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_ot, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id])) {
+        std::cout << "Abort, blind lsb decommit failed!" << std::endl;
         throw std::runtime_error("Abort, blind lsb decommit failed!");
       }
 
@@ -865,10 +861,19 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
     int circ_from = circuits_from[exec_id];
     int circ_to = circuits_to[exec_id];
     Params thread_params = thread_params_vec[exec_id];
+
     thread_ver_successes.emplace_back(std::make_unique<bool>(true));
     bool* ver_success = thread_ver_successes[exec_id].get();
 
-    top_soldering_execs_finished[exec_id] = thread_pool.push([this, thread_params, exec_id, circ_from, circ_to, &circuits, &eval_gates_to_blocks, &eval_auths_to_blocks, ver_success] (int id) {
+    int num_outs_needed = 0;
+    for (int i = circ_from; i < circ_to; ++i) {
+      num_outs_needed += circuits[i]->num_out_wires;
+    }
+
+    top_soldering_execs_finished[exec_id] = thread_pool.push([this, thread_params, exec_id, circ_from, circ_to, num_outs_needed, &circuits, &eval_gates_to_blocks, &eval_auths_to_blocks, ver_success] (int id) {
+
+      BYTEArrayVector commit_shares_outs(num_outs_needed, CODEWORD_BYTES);
+      int curr_out_write_pos = 0;
 
       for (int c = circ_from; c < circ_to; ++c) {
         Circuit* circuit = circuits[c];
@@ -962,7 +967,42 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
             XOR_128(eval_gates.S_R + (curr_head_pos + j) * CSEC_BYTES, topological_solderings[right_inp_start + i]);
           }
         }
+
+        //Leak LSB(out_key)
+        for (int i = circuit->num_out_wires; i > 0; --i) {
+          std::copy(topsolder_computed_shares_tmp[circuit->num_wires - i],
+                    topsolder_computed_shares_tmp[circuit->num_wires - i + 1],
+                    commit_shares_outs[curr_out_write_pos]);
+
+          ++curr_out_write_pos;
+        }
       }
+
+      //Decommit
+      BYTEArrayVector commit_shares_lsb_blind(SSEC, CODEWORD_BYTES);
+      if (!commit_receivers[exec_id].Commit(commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
+        std::cout << "Abort, out blind commit failed!" << std::endl;
+        throw std::runtime_error("Abort, out blind commit failed!");
+      }
+
+      BYTEArrayVector decommit_lsb(BITS_TO_BYTES(num_outs_needed), 1);
+      exec_channels[exec_id]->recv(decommit_lsb.data(), decommit_lsb.size());
+
+      if (!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_outs, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id])) {
+        std::cout << "Abort, out blind lsb decommit failed!" << std::endl;
+        throw std::runtime_error("Abort, out blind lsb decommit failed!");
+      }
+
+      //Todo store in global
+      uint32_t prev_outputs = 0;
+      for (int i = 0; i < exec_id; ++i) {
+        prev_outputs += thread_params_vec[i].num_pre_outputs;
+      }
+
+      for (int i = 0; i < thread_params.num_pre_outputs; ++i) {
+        global_out_lsb[prev_outputs + i] = GetBit(i, decommit_lsb.data());
+      }
+
     });
   }
 
@@ -1021,16 +1061,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
       Gate g;
       uint8_t* eval_input;
       uint8_t* eval_outputs;
-      // uint8_t* const_inp_keys;
-      // uint8_t* eval_inp_keys;
-      // uint8_t* out_decommit_values;
-      // uint8_t* eval_computed_shares_inp;
-      // uint8_t* eval_computed_shares_out;
-      // uint8_t* decommit_shares_inp_0;
-      // uint8_t* decommit_shares_inp_1;
-      // uint8_t* decommit_shares_out_0;
-      // uint8_t* decommit_shares_out_1;
-      // uint8_t* e;
       __m128i intrin_outs[thread_params.num_bucket];
       __m128i intrin_auths[thread_params.num_auth];
       int bucket_score[thread_params.num_bucket];
@@ -1060,25 +1090,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
         BYTEArrayVector const_inp_keys(circuit->num_const_inp_wires, CSEC_BYTES);
         BYTEArrayVector eval_inp_keys(circuit->num_eval_inp_wires, CSEC_BYTES);
 
-        // uint8_t* ot_input = new uint8_t[2 * BITS_TO_BYTES(circuit->num_eval_inp_wires) + (circuit->num_eval_inp_wires + circuit->num_out_wires) * CODEWORD_BYTES + circuit->num_const_inp_wires * CSEC_BYTES + (circuit->num_eval_inp_wires + circuit->num_out_wires) * (CODEWORD_BYTES + 2 * CSEC_BYTES)];
-
-        // e = ot_input + BITS_TO_BYTES(circuit->num_eval_inp_wires);
-
-        // eval_computed_shares_inp = e + BITS_TO_BYTES(circuit->num_eval_inp_wires);
-        // eval_computed_shares_out = eval_computed_shares_inp + circuit->num_eval_inp_wires * CODEWORD_BYTES;
-
-        // const_inp_keys = eval_computed_shares_out + circuit->num_out_wires * CODEWORD_BYTES;
-
-        // decommit_shares_inp_0 = const_inp_keys + circuit->num_const_inp_wires * CSEC_BYTES;
-        // decommit_shares_inp_1 = decommit_shares_inp_0 + circuit->num_eval_inp_wires * CODEWORD_BYTES;
-
-        // eval_inp_keys = decommit_shares_inp_1 + circuit->num_eval_inp_wires * CSEC_BYTES;
-
-        // decommit_shares_out_0 = eval_inp_keys + circuit->num_eval_inp_wires * CSEC_BYTES;
-        // decommit_shares_out_1 = decommit_shares_out_0 + circuit->num_out_wires * CODEWORD_BYTES;
-
-        // out_decommit_values = decommit_shares_out_1 + circuit->num_eval_inp_wires * CSEC_BYTES;
-
         uint32_t num_receiving_bytes_inp = circuit->num_const_inp_wires * CSEC_BYTES + circuit->num_eval_inp_wires * (CODEWORD_BYTES + CSEC_BYTES);
         uint32_t num_receiving_bytes_out = circuit->num_out_wires * (CODEWORD_BYTES + CSEC_BYTES);
 
@@ -1087,10 +1098,7 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
           XORBit(i, GetBit(i, eval_input), global_dot_choices[curr_input], e.data());
         }
 
-        // XOR_UINT8_T(e, eval_input, ot_input, BITS_TO_BYTES(circuit->num_eval_inp_wires));
-//        SafeAsyncSend(*exec_channels[exec_id], e);
         exec_channels[exec_id]->asyncSendCopy(e);
-        // thread_params.chan.Send(e, BITS_TO_BYTES(circuit->num_eval_inp_wires));
 
         auto t0 = GET_TIME();
 
@@ -1123,14 +1131,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
         }
         auto t2 = GET_TIME();
 
-        // decommit_shares_inp_0 = const_inp_keys + circuit->num_const_inp_wires * CSEC_BYTES;
-        // decommit_shares_inp_1 = decommit_shares_inp_0 + circuit->num_eval_inp_wires * CODEWORD_BYTES;
-        // decommit_shares_out_0 = decommit_shares_inp_1 + circuit->num_eval_inp_wires * CSEC_BYTES;
-        // decommit_shares_out_1 = decommit_shares_out_0 + circuit->num_out_wires * CODEWORD_BYTES;
-        // if (!VerifyDecommits(decommit_shares_inp_0, decommit_shares_inp_1, eval_computed_shares_inp, eval_inp_keys, rot_choices.get(), commit_recs[exec_id]->code.get(), circuit->num_eval_inp_wires)) {
-        //   throw std::runtime_error("Abort: Wrong eval keys sent!");
-        // }
-
         auto t3 = GET_TIME();
 
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
@@ -1144,7 +1144,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
 
           if ((GetLSB(eval_inp_keys[i]) ^ lsb_zero_key) != GetBit(i, eval_input)) {
             std::cout << "Abort: Wrong eval value keys sent!" << std::endl;
-            return;
             throw std::runtime_error("Abort: Wrong eval value keys sent!");
           }
 
@@ -1255,34 +1254,14 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
           }
         }
 
-        // for (int i = 0; i < circuit->num_out_wires; ++i) {
-        //   curr_output = (out_offset + i);
-        //   ot_commit_block = curr_output / thread_params.num_pre_outputs;
-        //   commit_id = thread_params.out_lsb_blind_start + curr_output % thread_params.num_pre_outputs;
+        auto t6 = GET_TIME();
+        for (int i = 0; i < circuit->num_out_wires; ++i) {
+          curr_output = (out_offset + i);
+          SetBit(i, global_out_lsb[curr_output] ^ GetLSB(intrin_values[circuit->num_wires - circuit->num_out_wires + i]), eval_outputs);
+        }
 
-        //   std::copy(commit_shares[ot_commit_block][commit_id], commit_shares[ot_commit_block][commit_id + 1], eval_computed_shares_out + i * CODEWORD_BYTES);
+        auto t7 = GET_TIME();
 
-        //   //Add the output key
-        //   curr_output_pos = (gate_offset + circuit->num_and_gates - circuit->num_out_wires + i) * thread_params.num_bucket;
-        //   eval_gates_to_blocks.GetExecIDAndIndex(curr_output_pos, curr_output_block, curr_output_idx);
-
-        //   XOR_CodeWords(eval_computed_shares_out + i * CODEWORD_BYTES, commit_recs[curr_output_block]->commit_shares[thread_params.out_keys_start + curr_output_idx]);
-        // }
-
-        // thread_params.chan.ReceiveBlocking(decommit_shares_out_0, num_receiving_bytes_out);
-
-        // if (!VerifyDecommits(decommit_shares_out_0, decommit_shares_out_1, eval_computed_shares_out, out_decommit_values, rot_choices.get(), commit_recs[exec_id]->code.get(), circuit->num_out_wires)) {
-        //   throw std::runtime_error("Abort: Wrong eval keys sent!");
-        // }
-
-        // auto t6 = GET_TIME();
-        // for (int i = 0; i < circuit->num_out_wires; ++i) {
-        //   SetBit(i, GetLSB(out_decommit_values + i * CSEC_BYTES) ^ GetBit(out_offset + i, verleak_bits.get()) ^ GetLSB(intrin_values[circuit->num_wires - circuit->num_out_wires + i]), eval_outputs);
-        // }
-
-        // auto t7 = GET_TIME();
-
-        // delete[] ot_input;
         delete[] intrin_values;
 
 #ifdef TINY_PRINT
@@ -1322,212 +1301,4 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
   std::cout << "Received " << bytes_received << " Bytes" << std::endl;
   std::cout << "Sent " << bytes_sent << " Bytes" << std::endl;
 #endif
-}
-
-//The below function is essentially a mix of the three CommitRec member functions ConsistencyCheck, BatchDecommit and VerifyTransposedDecommits.
-bool TinyEvaluator::BatchDecommitLSB(CommitReceiver* commit_rec, uint8_t decommit_shares[], int num_values, uint8_t values[]) {
-
-  // uint8_t ver_leak_challenge[BITS_TO_BYTES(commit_rec->col_dim_single) + CSEC_BYTES];
-  // commit_rec->params.rnd.GenRnd(ver_leak_challenge, 2 * CSEC_BYTES);
-  // commit_rec->params.chan.Send(ver_leak_challenge, 2 * CSEC_BYTES);
-
-  // uint8_t* delta_chal = ver_leak_challenge;
-  // uint8_t* alpha_seed = ver_leak_challenge + CSEC_BYTES;
-
-  // //Preprocess DELTA
-  // int delta_matrix_size = BITS_TO_BYTES(commit_rec->row_dim * commit_rec->col_dim_single); //delta_matrix_size is 8x smaller than transpose_matrix_size.
-
-  // std::unique_ptr<uint8_t[]> delta_matrix_tmp(std::make_unique<uint8_t[]>(2 * delta_matrix_size));
-
-  // //Load Delta share into the matrix to be transposed. However only if the bit is set in delta_chal. The remaining columns are left as 0. This reflects adding Delta or not.
-  // for (int i = 0; i < commit_rec->col_dim_single; ++i) {
-  //   if (GetBit(i, delta_chal)) {
-  //     std::copy(commit_rec->commit_shares[commit_rec->params.delta_pos], commit_rec->commit_shares[commit_rec->params.delta_pos + 1], delta_matrix_tmp.get() + delta_matrix_size + i * commit_rec->row_dim_bytes);
-  //   }
-  // }
-
-  // //Transpose the blocks containing the Delta share
-  // transpose_128_320(delta_matrix_tmp.get() + delta_matrix_size, delta_matrix_tmp.get(), 1);
-
-
-  // //The below proceeds more in line with normal batch decommit/consistency check.
-
-  // //Setup all registers for calculation the linear combinations. Will end up with SSEC linear combinations. The final_values_result will hold the linear combinations of the postulated values.
-  // uint8_t final_result[CODEWORD_BYTES * SSEC];
-  // uint8_t final_values_result[CSEC_BYTES * SSEC];
-
-  // //res_tmp is twice as large as we do not do degree reduction until the very end, so we need to accumulate a larger intermediate value.
-  // __m128i res_tmp[2][CODEWORD_BITS];
-  // __m128i res_values_tmp[2][AES_BITS];
-  // __m128i res_total[CODEWORD_BITS];
-  // for (int i = 0; i < CODEWORD_BITS; ++i) {
-  //   res_tmp[0][i] = _mm_setzero_si128();
-  //   res_tmp[1][i] = _mm_setzero_si128();
-  //   res_total[i] = _mm_lddqu_si128((__m128i*) (delta_matrix_tmp.get() + i * AES_BYTES)); //Apply DELTA shares
-  //   if (i < AES_BITS) {
-  //     res_values_tmp[0][i] = _mm_setzero_si128();
-  //     res_values_tmp[1][i] = _mm_setzero_si128();
-  //   }
-  // }
-
-  // __m128i val;
-  // __m128i val_result[2];
-
-  // //Used for transposing the commitment shares
-  // std::unique_ptr<uint8_t[]> matrices_tmp(std::make_unique<uint8_t[]>(2 * commit_rec->transpose_matrix_size));
-
-  // //Used for transposing the values
-  // CBitVector matrix_buffer_values;
-  // matrix_buffer_values.AttachBuf((uint8_t*) malloc(commit_rec->transpose_matrix_values_size), commit_rec->transpose_matrix_values_size);
-
-  // //Load the initial challenge element
-  // __m128i alpha = _mm_lddqu_si128((__m128i *) alpha_seed);
-
-  // //Compute number of check_blocks needed in total for num_values
-  // int num_check_blocks = CEIL_DIVIDE(num_values, commit_rec->col_dim);
-
-  // //For each check_block we load the shares in column-major order and then transpose to get to row-major order so we can address AES_BITS values entry-wise at a time.
-  // for (int j = 0; j < num_check_blocks; ++j) {
-  //   //As we only compare bits we set the vector to all 0 and load the bits one by one. Therefore need to reset it each time.
-  //   std::fill(matrix_buffer_values.GetArr(), matrix_buffer_values.GetArr() + commit_rec->transpose_matrix_values_size, 0);
-
-  //   //Load block
-  //   for (int i = 0; i < commit_rec->col_dim; ++i) {
-
-  //     //First we check if we are done, ie we are in the last block and it is not entirely filled up.
-  //     int num_check_index = j * commit_rec->col_dim + i;
-  //     if (num_check_index < num_values) {
-  //       //We copy the correct share into our current block matrix
-  //       std::copy(decommit_shares + num_check_index * CODEWORD_BYTES, decommit_shares + num_check_index * CODEWORD_BYTES + CODEWORD_BYTES, matrices_tmp.get() + commit_rec->transpose_matrix_size + i * commit_rec->row_dim_bytes);
-
-  //       //We copy the current bit value into our current block matrix
-  //       SetBit(AES_BITS - 1, GetBit(num_check_index, values), matrix_buffer_values.GetArr() + i * commit_rec->row_dim_values_bytes);
-
-  //     } else {
-  //       //This pads the last block with 0 rows. Can be optimized by only doing this once. However need to calculate the remaining number of "rows" to zero out then.
-  //       std::fill(matrices_tmp.get() + commit_rec->transpose_matrix_size + i * commit_rec->row_dim_bytes, matrices_tmp.get() + commit_rec->transpose_matrix_size + i * commit_rec->row_dim_bytes + CODEWORD_BYTES, 0);
-  //     }
-  //   }
-
-  //   //Transpose block
-  //   transpose_128_320(matrices_tmp.get() + commit_rec->transpose_matrix_size, matrices_tmp.get(), commit_rec->col_blocks);
-
-  //   //The values matrix can be transposed using 8*128x128 matrix transpose. This matrix holds has values in the AES-1 position. The rest are all 0.
-  //   matrix_buffer_values.EklundhBitTranspose(commit_rec->col_dim, commit_rec->row_dim_values);
-
-  //   //Compute on block. Processes the block matrices in the same way as for the consistency check with the modification that there is no blinding values
-  //   for (int l = 0; l < commit_rec->col_blocks; ++l) {
-  //     for (int i = 0; i < CODEWORD_BITS; ++i) {
-  //       //Load current row into val. If we are in one of the last AES_BITS commitments we directly add this to the final result as blinding. Else we multiply by alpha^(i+1) and store it in res_tmp.
-  //       val = _mm_lddqu_si128((__m128i*) (matrices_tmp.get() + l * AES_BYTES + i * commit_rec->col_dim_bytes));
-
-  //       if (j * commit_rec->col_dim + l * AES_BITS < num_values - AES_BITS) {
-  //         //The actual commitments are multiplied with alpha
-  //         mul128_karatsuba(val, alpha, &val_result[0], &val_result[1]);
-
-  //         //Accumulate the val_result into res_tmp
-  //         res_tmp[0][i] = _mm_xor_si128(res_tmp[0][i], val_result[0]);
-  //         res_tmp[1][i] = _mm_xor_si128(res_tmp[1][i], val_result[1]);
-
-  //         //Also, only process the values for the first AES_BITS bits as these are only this long
-  //         if (i < AES_BITS) {
-  //           val = _mm_lddqu_si128((__m128i*) (matrix_buffer_values.GetArr() + l * AES_BYTES + i * commit_rec->col_dim_bytes));
-  //           mul128_karatsuba(val, alpha, &val_result[0], &val_result[1]);
-  //           res_values_tmp[0][i] = _mm_xor_si128(res_values_tmp[0][i], val_result[0]);
-  //           res_values_tmp[1][i] = _mm_xor_si128(res_values_tmp[1][i], val_result[1]);
-  //         }
-  //       } else if (j * commit_rec->col_dim + l * AES_BITS < num_values) {
-  //         //The AES_BITS blinding one-time commitments are added directly to res_totals
-  //         res_total[i] = _mm_xor_si128(res_total[i], val);
-  //       }
-  //     }
-  //     //When done with one col_block we square the challenge element alpha. There are 8 col_blocks within each block
-  //     gfmul128_no_refl(alpha, alpha, &alpha);
-  //   }
-  // }
-
-  // //Need to manually delete this matrix
-  // matrix_buffer_values.delCBitVector();
-
-  // //mask is used to select the first SSEC linear combinations from res_total and store in final_result. Needed as we actually produce AES_BITS linear combinations due to convenience. However we only send and verify 2*SSEC of these.
-  // uint8_t mask[CSEC_BYTES] = {0};
-  // std::fill(mask, mask + SSEC_BYTES, 0xFF);
-  // __m128i store_mask = _mm_lddqu_si128((__m128i*) mask);
-
-  // //Reduce and store the resulting linear combinations
-  // for (int i = 0; i < CODEWORD_BITS; ++i) {
-  //   gfred128_no_refl(res_tmp[0][i], res_tmp[1][i], &res_tmp[0][i]);
-  //   res_total[i] = _mm_xor_si128(res_total[i], res_tmp[0][i]);
-
-  //   //Finally move the SSEC first linear combinations of the shares into final_result
-  //   _mm_maskmoveu_si128(res_total[i], store_mask, (char*) (final_result + i * SSEC_BYTES));
-
-  //   if (i < AES_BITS) {
-  //     gfred128_no_refl(res_values_tmp[0][i], res_values_tmp[1][i], &res_values_tmp[0][i]);
-
-  //     //Finally move the SSEC first linear combinations of the values into final_values_result
-  //     _mm_maskmoveu_si128(res_values_tmp[0][i], store_mask, (char*) (final_values_result + i * SSEC_BYTES));
-  //   }
-  // }
-
-  // //Receive the decommitments from CommitSnd that will be compared to the computed shares in final_result.
-  // uint8_t decommit_shares0[2 * SSEC * CODEWORD_BYTES];
-  // uint8_t* decommit_shares1 = decommit_shares0 + SSEC * CODEWORD_BYTES;
-  // commit_rec->params.chan.ReceiveBlocking(decommit_shares0, 2 * SSEC * CODEWORD_BYTES);
-
-  // //The below code is copied directly from the member function VerifyTransposedDecommits of CommitRec. Not the prettiest, but we need the values of matrix1 in order to perform our final consistency check
-  // std::unique_ptr<uint8_t[]> matrix0(std::make_unique<uint8_t[]>(2 * commit_rec->transpose_matrix_size));
-  // uint8_t* matrix1 = matrix0.get() + commit_rec->transpose_matrix_size;
-
-  // //Read all shares in row-major order and compare choice bits row-wise. We check all num_values in parallel this way. Notice we select only the first num_values bits of each share using store_mask and bit-wise AND.
-  // __m128i share, share0, share1, tmp;
-  // for (int i = 0; i < CODEWORD_BITS; ++i) {
-  //   share = _mm_lddqu_si128((__m128i*) (final_result + i * SSEC_BYTES));
-  //   share = _mm_and_si128(share, store_mask);
-
-  //   share0 = _mm_lddqu_si128((__m128i*) (decommit_shares0 + i * SSEC_BYTES));
-  //   share0 = _mm_and_si128(share0, store_mask);
-
-  //   share1 = _mm_lddqu_si128((__m128i*) (decommit_shares1 + i * SSEC_BYTES));
-  //   share1 = _mm_and_si128(share1, store_mask);
-
-  //   tmp = _mm_xor_si128(share0, share1);
-  //   _mm_storeu_si128((__m128i*) (matrix0.get() + i * commit_rec->col_dim_single_bytes), tmp);
-
-  //   if (GetBit(i, commit_rec->choices)) {
-  //     if (!compare128(share, share1)) {
-  //       return false;
-  //     }
-  //   } else {
-  //     if (!compare128(share, share0)) {
-  //       return false;
-  //     }
-  //   }
-  // }
-  // transpose_320_128(matrix0.get(), matrix1);
-
-  // uint8_t tmp_checkbits[BCH_BYTES];
-  // for (int i = 0; i < SSEC; ++i) {
-
-  //   std::fill(tmp_checkbits, tmp_checkbits + BCH_BYTES, 0);
-
-  //   commit_rec->code->Encode(matrix1 + i * commit_rec->row_dim_bytes, tmp_checkbits);
-
-  //   if (!std::equal(tmp_checkbits, tmp_checkbits + BCH_BYTES, matrix1 + CSEC_BYTES + i * commit_rec->row_dim_bytes)) {
-  //     std::cout << "Abort! Linear combination " << i << " is not a codeword" << std::endl;
-  //     return false; //Not a codeword!
-  //   }
-  // }
-
-  // //If the decommits check out, processed and verify that these were actually linear combinations of the postulated values as well. If everything is ok we are sure that the num_values postulated bits in values[] are indeed the committed lsbs and we return true.
-  // for (int i = 0; i < SSEC; ++i) {
-  //   if ((GetBitReversed(i, final_values_result + (AES_BYTES - 1) * SSEC)) != //the linear combinations of the values
-  //       (GetLSB(matrix1 + i * commit_rec->row_dim_bytes) ^ //linear combinations of the decommitted values
-  //        GetBit(i, delta_chal) ^ //Efficiently flips the bit if delta is included. Ensures that lsb(delta) = 1.
-  //        GetBit(num_values - AES_BITS + i, values))) { //Masks out the blinding bit that is added for each combination
-  //     return false;
-  //   }
-  // }
-
-  return true;
 }

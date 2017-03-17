@@ -21,23 +21,13 @@ public:
   void Preprocess();
   void Offline(std::vector<Circuit*>& circuits, int top_num_execs);
   void Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs, std::vector<uint8_t*>& outputs, int eval_num_execs);
-  bool BatchDecommitLSB(CommitReceiver* commit_rec, uint8_t decommit_shares[], int num_values, uint8_t values[]);
-  
 
-  //For deletion soon
-  // ALSZDOTExtRec ot_rec;
-  // std::unique_ptr<uint8_t[]> rot_seeds;
-  // std::unique_ptr<uint8_t[]> rot_choices;
-  // std::vector<std::unique_ptr<CommitReceiver>> commit_recs;
-  
-  int rot_start_pos;
-
-  std::unique_ptr<uint8_t[]> verleak_bits;
   std::unique_ptr<uint8_t[]> raw_eval_data;
   std::unique_ptr<uint32_t[]> raw_eval_ids;
 
   osuCrypto::BitVector global_dot_choices;
   osuCrypto::BitVector global_dot_lsb;
+  osuCrypto::BitVector global_out_lsb;
   BYTEArrayVector global_input_masks;
   
   std::vector<BYTEArrayVector> commit_shares;  
