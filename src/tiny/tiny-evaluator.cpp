@@ -11,7 +11,11 @@ TinyEvaluator::TinyEvaluator(uint8_t seed[], Params& params) :
   commit_seed_OTs(CODEWORD_BITS),
   commit_seed_choices(CODEWORD_BITS),
   commit_receivers(params.num_execs),
-  commit_shares(params.num_execs) {
+  commit_shares(params.num_execs),
+  global_dot_choices(params.num_pre_inputs),
+  global_dot_lsb(params.num_pre_inputs),
+  global_input_masks(params.num_pre_inputs, CSEC_BYTES)
+{
 
   //Pointers for convenience to the raw data used for storing the produced eval gates and eval auths. Each exec will write to this array in seperate positions and thus filling it completely. Needs to be computed like this to avoid overflow of evla_data_size
   eval_gates.T_G = raw_eval_data.get();
@@ -195,10 +199,10 @@ void TinyEvaluator::Preprocess() {
       BYTEArrayVector input_masks(num_ots, CSEC_BYTES);
 
       std::vector<osuCrypto::block> msgs(num_ots);
-      osuCrypto::BitVector dot_choice(num_ots);
-      dot_choice.randomize(exec_rnds[exec_id]);
+      osuCrypto::BitVector dot_choices(num_ots);
+      dot_choices.randomize(exec_rnds[exec_id]);
 
-      dot_receivers[exec_id]->receive(dot_choice, msgs, exec_rnds[exec_id], *exec_channels[exec_id]);
+      dot_receivers[exec_id]->receive(dot_choices, msgs, exec_rnds[exec_id], *exec_channels[exec_id]);
 
       for (int i = 0; i < num_ots; ++i) {
         _mm_storeu_si128((__m128i*) input_masks[i], msgs[i]);
@@ -219,6 +223,29 @@ void TinyEvaluator::Preprocess() {
       //Run chosen commit
       BYTEArrayVector input_mask_corrections(num_ots, CSEC_BYTES);
       exec_channels[exec_id]->recv(input_mask_corrections.data(), input_mask_corrections.size());
+
+
+      BYTEArrayVector commit_shares_lsb_blind(SSEC, CODEWORD_BYTES);
+      if(!commit_receivers[exec_id].Commit(commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
+        std::cout << "Abort, blind commit failed!" << std::endl;
+        throw std::runtime_error("Abort, blind commit failed!");
+      }
+
+      BYTEArrayVector decommit_lsb(BITS_TO_BYTES(num_ots), 1);
+      exec_channels[exec_id]->recv(decommit_lsb.data(), decommit_lsb.size());
+
+
+      BYTEArrayVector commit_shares_ot(num_ots, CODEWORD_BYTES);
+      for (int i = 0; i < num_ots; ++i) {
+        std::copy(commit_shares[exec_id][thread_params_vec[exec_id].ot_chosen_start + i], commit_shares[exec_id][thread_params_vec[exec_id].ot_chosen_start + i + 1], commit_shares_ot[i]);
+      }
+
+
+      if(!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_ot, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id])) {
+         std::cout << "Abort, blind lsb decommit failed!" << std::endl;
+        throw std::runtime_error("Abort, blind lsb decommit failed!");
+      }
+
 
       auto commit_end = GET_TIME();
       durations[EVAL_COMMIT_TIME][exec_id] = commit_end - commit_begin;
@@ -255,7 +282,7 @@ void TinyEvaluator::Preprocess() {
 
       if (delta_flipped) {
         for (int i = 0; i < num_ots; ++i) {
-          XORBit(127, dot_choice[i], input_masks[i]);
+          XORBit(127, dot_choices[i], input_masks[i]);
         }
       }
 
@@ -268,7 +295,7 @@ void TinyEvaluator::Preprocess() {
         std::copy(input_masks[thread_params_vec[exec_id].num_pre_inputs], input_masks[num_ots], cnc_ot_values.data());
 
         for (int i = 0; i < SSEC; ++i) {
-          if (dot_choice[thread_params_vec[exec_id].num_pre_inputs + i]) {
+          if (dot_choices[thread_params_vec[exec_id].num_pre_inputs + i]) {
             SetBit(i, 1, ot_delta_cnc_choices);
           } else {
             SetBit(i, 0, ot_delta_cnc_choices);
@@ -311,9 +338,16 @@ void TinyEvaluator::Preprocess() {
       }
 //////////////////////////////////////CNC////////////////////////////////////
 
+      uint32_t prev_inputs = 0;
+      for (int i = 0; i < exec_id; ++i) {
+        prev_inputs += thread_params_vec[i].num_pre_inputs;
+      }
+
       for (int i = 0; i < thread_params_vec[exec_id].num_pre_inputs; ++i) {
 
-        XOR_128(input_mask_corrections[i], input_masks[i]); // turns input_mask_corrections[i] into committed value
+        XOR_128(global_input_masks[prev_inputs + i], input_mask_corrections[i], input_masks[i]); // turns input_mask_corrections[i] into committed value
+        global_dot_choices[prev_inputs + i] = dot_choices[i];
+        global_dot_lsb[prev_inputs + i] = GetBit(i, decommit_lsb.data());
       }
 
       // //===========================VER_LEAK====================================
@@ -967,314 +1001,327 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
 
 void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs, std::vector<uint8_t*>& outputs, int eval_num_execs) {
 
-//   std::vector<std::future<void>> online_execs_finished(eval_num_execs);
-//   std::vector<int> circuits_from, circuits_to;
+  std::vector<std::future<void>> online_execs_finished(eval_num_execs);
+  std::vector<int> circuits_from, circuits_to;
 
-//   PartitionBufferFixedNum(circuits_from, circuits_to, eval_num_execs, circuits.size());
+  PartitionBufferFixedNum(circuits_from, circuits_to, eval_num_execs, circuits.size());
 
-//   IDMap eval_auths_to_blocks(eval_auths_ids, thread_params_vec[0].Q + thread_params_vec[0].A, thread_params_vec[0].auth_start);
-//   IDMap eval_gates_to_blocks(eval_gates_ids, thread_params_vec[0].Q + thread_params_vec[0].A, thread_params_vec[0].out_keys_start);
+  IDMap eval_auths_to_blocks(eval_auths_ids, thread_params_vec[0].Q + thread_params_vec[0].A, thread_params_vec[0].auth_start);
+  IDMap eval_gates_to_blocks(eval_gates_ids, thread_params_vec[0].Q + thread_params_vec[0].A, thread_params_vec[0].out_keys_start);
 
-//   for (int exec_id = 0; exec_id < eval_num_execs; ++exec_id) {
+  for (int exec_id = 0; exec_id < eval_num_execs; ++exec_id) {
 
-//     int circ_from = circuits_from[exec_id];
-//     int circ_to = circuits_to[exec_id];
-//     Params* thread_params = thread_params_vec[exec_id].get();
+    int circ_from = circuits_from[exec_id];
+    int circ_to = circuits_to[exec_id];
+    Params thread_params = thread_params_vec[exec_id];
 
-//     online_execs_finished[exec_id] = thread_pool.push([this, thread_params, exec_id, circ_from, circ_to, &circuits, &inputs, &outputs, &eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
+    online_execs_finished[exec_id] = thread_pool.push([this, &thread_params, exec_id, circ_from, circ_to, &circuits, &inputs, &outputs, &eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
 
-//       Circuit* circuit;
-//       Gate g;
-//       uint8_t* eval_input;
-//       uint8_t* eval_outputs;
-//       uint8_t* const_inp_keys;
-//       uint8_t* eval_inp_keys;
-//       uint8_t* out_decommit_values;
-//       uint8_t* eval_computed_shares_inp;
-//       uint8_t* eval_computed_shares_out;
-//       uint8_t* decommit_shares_inp_0;
-//       uint8_t* decommit_shares_inp_1;
-//       uint8_t* decommit_shares_out_0;
-//       uint8_t* decommit_shares_out_1;
-//       uint8_t* e;
-//       __m128i intrin_outs[thread_params.num_bucket];
-//       __m128i intrin_auths[thread_params.num_auth];
-//       int bucket_score[thread_params.num_bucket];
-//       bool all_equal;
+      Circuit* circuit;
+      Gate g;
+      uint8_t* eval_input;
+      uint8_t* eval_outputs;
+      // uint8_t* const_inp_keys;
+      // uint8_t* eval_inp_keys;
+      // uint8_t* out_decommit_values;
+      // uint8_t* eval_computed_shares_inp;
+      // uint8_t* eval_computed_shares_out;
+      // uint8_t* decommit_shares_inp_0;
+      // uint8_t* decommit_shares_inp_1;
+      // uint8_t* decommit_shares_out_0;
+      // uint8_t* decommit_shares_out_1;
+      // uint8_t* e;
+      __m128i intrin_outs[thread_params.num_bucket];
+      __m128i intrin_auths[thread_params.num_auth];
+      int bucket_score[thread_params.num_bucket];
+      bool all_equal;
 
-//       int gate_offset, inp_gate_offset, inp_offset, out_offset, curr_and_gate;
-//       int curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx, curr_head_pos, curr_head_block, curr_head_idx, curr_output_pos, curr_output_block, curr_output_idx;
+      int gate_offset, inp_gate_offset, inp_offset, out_offset, curr_and_gate;
+      int curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx, curr_head_pos, curr_head_block, curr_head_idx, curr_output_pos, curr_output_block, curr_output_idx;
 
-//       GarblingHandler gh(*thread_params);
-//       int curr_input, curr_output, ot_commit_block, commit_id, chosen_val_id;
-//       for (int c = circ_from; c < circ_to; ++c) {
-//         auto t_0 = GET_TIME();
-//         circuit = circuits[c];
-//         eval_input = inputs[c];
-//         eval_outputs = outputs[c];
-//         gate_offset = gates_offset[c];
-//         inp_gate_offset = inp_gates_offset[c];
-//         inp_offset = inputs_offset[c];
-//         out_offset = outputs_offset[c];
+      GarblingHandler gh(thread_params);
+      int curr_input, curr_output, ot_commit_block, commit_id, chosen_val_id;
+      for (int c = circ_from; c < circ_to; ++c) {
+        auto t_0 = GET_TIME();
+        circuit = circuits[c];
+        eval_input = inputs[c];
+        eval_outputs = outputs[c];
+        gate_offset = gates_offset[c];
+        inp_gate_offset = inp_gates_offset[c];
+        inp_offset = inputs_offset[c];
+        out_offset = outputs_offset[c];
 
-//         uint8_t* ot_input = new uint8_t[2 * BITS_TO_BYTES(circuit->num_eval_inp_wires) + (circuit->num_eval_inp_wires + circuit->num_out_wires) * CODEWORD_BYTES + circuit->num_const_inp_wires * CSEC_BYTES + (circuit->num_eval_inp_wires + circuit->num_out_wires) * (CODEWORD_BYTES + 2 * CSEC_BYTES)];
+        BYTEArrayVector e(BITS_TO_BYTES(circuit->num_eval_inp_wires), 1);
+        BYTEArrayVector ot_choices(BITS_TO_BYTES(circuit->num_eval_inp_wires), 1);
 
-//         e = ot_input + BITS_TO_BYTES(circuit->num_eval_inp_wires);
+        BYTEArrayVector eval_computed_shares_inp(circuit->num_eval_inp_wires, CODEWORD_BYTES);
+        BYTEArrayVector eval_computed_shares_out(circuit->num_out_wires, CODEWORD_BYTES);
 
-//         eval_computed_shares_inp = e + BITS_TO_BYTES(circuit->num_eval_inp_wires);
-//         eval_computed_shares_out = eval_computed_shares_inp + circuit->num_eval_inp_wires * CODEWORD_BYTES;
+        BYTEArrayVector const_inp_keys(circuit->num_const_inp_wires, CSEC_BYTES);
+        BYTEArrayVector eval_inp_keys(circuit->num_eval_inp_wires, CSEC_BYTES);
 
-//         const_inp_keys = eval_computed_shares_out + circuit->num_out_wires * CODEWORD_BYTES;
+        // uint8_t* ot_input = new uint8_t[2 * BITS_TO_BYTES(circuit->num_eval_inp_wires) + (circuit->num_eval_inp_wires + circuit->num_out_wires) * CODEWORD_BYTES + circuit->num_const_inp_wires * CSEC_BYTES + (circuit->num_eval_inp_wires + circuit->num_out_wires) * (CODEWORD_BYTES + 2 * CSEC_BYTES)];
 
-//         decommit_shares_inp_0 = const_inp_keys + circuit->num_const_inp_wires * CSEC_BYTES;
-//         decommit_shares_inp_1 = decommit_shares_inp_0 + circuit->num_eval_inp_wires * CODEWORD_BYTES;
+        // e = ot_input + BITS_TO_BYTES(circuit->num_eval_inp_wires);
 
-//         eval_inp_keys = decommit_shares_inp_1 + circuit->num_eval_inp_wires * CSEC_BYTES;
+        // eval_computed_shares_inp = e + BITS_TO_BYTES(circuit->num_eval_inp_wires);
+        // eval_computed_shares_out = eval_computed_shares_inp + circuit->num_eval_inp_wires * CODEWORD_BYTES;
 
-//         decommit_shares_out_0 = eval_inp_keys + circuit->num_eval_inp_wires * CSEC_BYTES;
-//         decommit_shares_out_1 = decommit_shares_out_0 + circuit->num_out_wires * CODEWORD_BYTES;
+        // const_inp_keys = eval_computed_shares_out + circuit->num_out_wires * CODEWORD_BYTES;
 
-//         out_decommit_values = decommit_shares_out_1 + circuit->num_eval_inp_wires * CSEC_BYTES;
+        // decommit_shares_inp_0 = const_inp_keys + circuit->num_const_inp_wires * CSEC_BYTES;
+        // decommit_shares_inp_1 = decommit_shares_inp_0 + circuit->num_eval_inp_wires * CODEWORD_BYTES;
 
-//         uint32_t num_receiving_bytes_inp = circuit->num_const_inp_wires * CSEC_BYTES + circuit->num_eval_inp_wires * (CODEWORD_BYTES + CSEC_BYTES);
-//         uint32_t num_receiving_bytes_out = circuit->num_out_wires * (CODEWORD_BYTES + CSEC_BYTES);
+        // eval_inp_keys = decommit_shares_inp_1 + circuit->num_eval_inp_wires * CSEC_BYTES;
 
-//         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
-//           curr_input = (inp_offset + i);
-//           if (GetBit(curr_input, ot_rec.choices_outer.get())) {
-//             SetBit(i, 1, ot_input);
-//           } else {
-//             SetBit(i, 0, ot_input);
-//           }
-//         }
+        // decommit_shares_out_0 = eval_inp_keys + circuit->num_eval_inp_wires * CSEC_BYTES;
+        // decommit_shares_out_1 = decommit_shares_out_0 + circuit->num_out_wires * CODEWORD_BYTES;
 
-//         XOR_UINT8_T(e, eval_input, ot_input, BITS_TO_BYTES(circuit->num_eval_inp_wires));
-//         thread_params.chan.Send(e, BITS_TO_BYTES(circuit->num_eval_inp_wires));
+        // out_decommit_values = decommit_shares_out_1 + circuit->num_eval_inp_wires * CSEC_BYTES;
 
-//         auto t0 = GET_TIME();
+        uint32_t num_receiving_bytes_inp = circuit->num_const_inp_wires * CSEC_BYTES + circuit->num_eval_inp_wires * (CODEWORD_BYTES + CSEC_BYTES);
+        uint32_t num_receiving_bytes_out = circuit->num_out_wires * (CODEWORD_BYTES + CSEC_BYTES);
 
-//         __m128i* intrin_values = new __m128i[circuit->num_wires]; //using raw pointer due to ~25% increase in overall performance. Since the online phase is so computationally efficient even the slightest performance hit is immediately seen. It does not matter in the others phases as they operation on a very different running time scale.
+        for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
+          curr_input = (inp_offset + i);
+          XORBit(i, GetBit(i, eval_input), global_dot_choices[curr_input], e.data());
+        }
 
-//         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
-//           curr_input = (inp_offset + i);
-//           ot_commit_block = curr_input / thread_params.num_pre_inputs;
-//           commit_id = thread_params.ot_chosen_start + curr_input % thread_params.num_pre_inputs;
+        // XOR_UINT8_T(e, eval_input, ot_input, BITS_TO_BYTES(circuit->num_eval_inp_wires));
+//        SafeAsyncSend(*exec_channels[exec_id], e);
+        exec_channels[exec_id]->asyncSendCopy(e);
+        // thread_params.chan.Send(e, BITS_TO_BYTES(circuit->num_eval_inp_wires));
 
-//           std::copy(commit_recs[ot_commit_block]->commit_shares[commit_id], commit_recs[ot_commit_block]->commit_shares[commit_id + 1], eval_computed_shares_inp + i * CODEWORD_BYTES);
+        auto t0 = GET_TIME();
 
-//           //Add the input key
-//           curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (inp_offset + circuit->num_const_inp_wires + i) * thread_params.num_inp_auth;
-//           eval_auths_to_blocks.GetExecIDAndIndex(curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx);
-//           XOR_CodeWords(eval_computed_shares_inp + i * CODEWORD_BYTES, commit_shares[curr_inp_head_block][thread_params.auth_start + curr_inp_head_idx]);
+        __m128i* intrin_values = new __m128i[circuit->num_wires]; //using raw pointer due to ~25% increase in overall performance. Since the online phase is so computationally efficient even the slightest performance hit is immediately seen. It does not matter in the others phases as they operation on a very different running time scale.
 
-//           if (GetBit(i, e)) {
-//             XOR_CodeWords(eval_computed_shares_inp + i * CODEWORD_BYTES, commit_recs[ot_commit_block]->commit_shares[thread_params.delta_pos]);
-//           }
-//         }
+        for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
+          curr_input = (inp_offset + i);
+          ot_commit_block = curr_input / thread_params.num_pre_inputs;
+          commit_id = thread_params.ot_chosen_start + curr_input % thread_params.num_pre_inputs;
 
-//         auto t = GET_TIME();
-//         thread_params.chan.ReceiveBlocking(const_inp_keys, num_receiving_bytes_inp);
-//         auto t2 = GET_TIME();
+          std::copy(commit_shares[ot_commit_block][commit_id], commit_shares[ot_commit_block][commit_id + 1], eval_computed_shares_inp[i]);
 
-//         decommit_shares_inp_0 = const_inp_keys + circuit->num_const_inp_wires * CSEC_BYTES;
-//         decommit_shares_inp_1 = decommit_shares_inp_0 + circuit->num_eval_inp_wires * CODEWORD_BYTES;
-//         decommit_shares_out_0 = decommit_shares_inp_1 + circuit->num_eval_inp_wires * CSEC_BYTES;
-//         decommit_shares_out_1 = decommit_shares_out_0 + circuit->num_out_wires * CODEWORD_BYTES;
-//         if (!VerifyDecommits(decommit_shares_inp_0, decommit_shares_inp_1, eval_computed_shares_inp, eval_inp_keys, rot_choices.get(), commit_recs[exec_id]->code.get(), circuit->num_eval_inp_wires)) {
-//           throw std::runtime_error("Abort: Wrong eval keys sent!");
-//         }
+          //Add the input key
+          curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (circuit->num_const_inp_wires + curr_input) * thread_params.num_inp_auth;
+          eval_auths_to_blocks.GetExecIDAndIndex(curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx);
+          XOR_CodeWords(eval_computed_shares_inp[i], commit_shares[curr_inp_head_block][thread_params.auth_start + curr_inp_head_idx]);
 
-//         auto t3 = GET_TIME();
+          if (GetBit(i, e.data())) {
+            XOR_CodeWords(eval_computed_shares_inp[i], commit_shares[ot_commit_block][thread_params.delta_pos]);
+          }
+        }
 
-//         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
-//           curr_input = (inp_offset + i);
-//           ot_commit_block = curr_input / thread_params.num_pre_inputs;
-//           chosen_val_id = curr_input % thread_params.num_pre_inputs;
-//           XOR_128(eval_inp_keys + i * CSEC_BYTES, commit_recs[ot_commit_block]->chosen_commit_values.get() + chosen_val_id * CSEC_BYTES);
+        auto t = GET_TIME();
+        exec_channels[exec_id]->recv(const_inp_keys.data(), const_inp_keys.size());
 
-//           //XOR out lsb(K^i_0)
-//           uint8_t lsb_zero_key = GetLSB(eval_inp_keys + i * CSEC_BYTES) ^ GetBit(params.num_pre_outputs + inp_offset + i, verleak_bits.get()) ^ GetBit(i, e);
+        //Send output decommits
+        if (!commit_receivers[exec_id].Decommit(eval_computed_shares_inp, eval_inp_keys, *exec_channels[exec_id])) {
+          std::cout << "Abort: Inp Decommit fail! " << std::endl;
+          throw std::runtime_error("Abort: Inp Decommit fail!");
+        }
+        auto t2 = GET_TIME();
 
-//           //XOR out K^i_y_i
-//           XOR_128(eval_inp_keys + i * CSEC_BYTES, ot_rec.response_outer.get() + curr_input * CSEC_BYTES);
+        // decommit_shares_inp_0 = const_inp_keys + circuit->num_const_inp_wires * CSEC_BYTES;
+        // decommit_shares_inp_1 = decommit_shares_inp_0 + circuit->num_eval_inp_wires * CODEWORD_BYTES;
+        // decommit_shares_out_0 = decommit_shares_inp_1 + circuit->num_eval_inp_wires * CSEC_BYTES;
+        // decommit_shares_out_1 = decommit_shares_out_0 + circuit->num_out_wires * CODEWORD_BYTES;
+        // if (!VerifyDecommits(decommit_shares_inp_0, decommit_shares_inp_1, eval_computed_shares_inp, eval_inp_keys, rot_choices.get(), commit_recs[exec_id]->code.get(), circuit->num_eval_inp_wires)) {
+        //   throw std::runtime_error("Abort: Wrong eval keys sent!");
+        // }
 
-//           //Check using lsb(K^i_0) that we received the correct key according to eval_input
-//           if ((GetLSB(eval_inp_keys + i * CSEC_BYTES) ^ lsb_zero_key) != GetBit(i, eval_input)) {
-//             throw std::runtime_error("Abort: Wrong eval value keys sent!");
-//           }
+        auto t3 = GET_TIME();
 
-//           intrin_values[circuit->num_const_inp_wires + i] = _mm_lddqu_si128((__m128i *) (eval_inp_keys + i * CSEC_BYTES));
-//         }
+        for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
+          curr_input = (inp_offset + i);
+          ot_commit_block = curr_input / thread_params.num_pre_inputs;
+          chosen_val_id = curr_input % thread_params.num_pre_inputs;
 
-//         auto t4 = GET_TIME();
+          uint8_t lsb_zero_key = GetLSB(eval_inp_keys[i]) ^ global_dot_lsb[curr_input] ^ GetBit(i, e.data());
 
-//         //Ensure that constructor sends valid keys. Implemented different than in paper as we here require that ALL input authenticators accept. This has no influence on security as if we abort here it does not leak anything about the evaluators input. Also, the sender knows if the evaluator is going to abort before sending the bad keys, so it leaks nothing.
-//         for (int i = 0; i < circuit->num_const_inp_wires; ++i) {
-//           intrin_values[i] = _mm_lddqu_si128((__m128i *) (const_inp_keys + i * CSEC_BYTES));
-//         }
+          XOR_128(eval_inp_keys[i], global_input_masks[curr_input]);
 
-//         for (int i = 0; i < circuit->num_inp_wires; ++i) {
-//           curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (inp_offset + i) * thread_params.num_inp_auth;
+          if ((GetLSB(eval_inp_keys[i]) ^ lsb_zero_key) != GetBit(i, eval_input)) {
+            std::cout << "Abort: Wrong eval value keys sent!" << std::endl;
+            return;
+            throw std::runtime_error("Abort: Wrong eval value keys sent!");
+          }
 
-//           for (int j = 0; j < thread_params.num_inp_auth; ++j) {
-//             if (!IntrinVerifyAuths(eval_auths, curr_auth_inp_head_pos + j, intrin_values[i], eval_auths_ids[curr_auth_inp_head_pos + j], gh.key_schedule)) {
-//               throw std::runtime_error("Abort: Inp auth fail!");
-//             }
-//           }
-//         }
+          intrin_values[circuit->num_const_inp_wires + i] = _mm_lddqu_si128((__m128i *) (eval_inp_keys[i]));
+        }
 
-// /////////////////////////////// DEBUG Input buckets////////////////////////////
-// #ifdef DEBUG_SOLDERINGS_INP_BUCKETS
-//         __m128i out_keys[2];
-//         for (int i = 0; i < circuit->num_const_inp_wires / 2; ++i) {
-//           int curr_inp_gate_head = params.num_pre_gates * params.num_bucket + (inp_gate_offset + i) * params.num_inp_bucket;
-//           IntrinShiftEvaluateGates(eval_gates, curr_inp_gate_head, intrin_values[i], intrin_values[circuit->num_const_inp_wires / 2 + i], out_keys[0], eval_gates_ids[curr_inp_gate_head], gh.key_schedule);
+        auto t4 = GET_TIME();
 
-//           for (int j = 1; j < params.num_inp_bucket; ++j) {
-//             IntrinShiftEvaluateGates(eval_gates, curr_inp_gate_head + j, intrin_values[i], intrin_values[circuit->num_const_inp_wires / 2 + i], out_keys[1], eval_gates_ids[curr_inp_gate_head + j], gh.key_schedule);
-//             if (!compare128(out_keys[0], out_keys[1])) {
-//               std::cout << "input gate fail pos:" << i << std::endl;
-//             }
-//           }
-//         }
-// #endif
-// /////////////////////////////// DEBUG Input buckets////////////////////////////
+        //Ensure that constructor sends valid keys. Implemented different than in paper as we here require that ALL input authenticators accept. This has no influence on security as if we abort here it does not leak anything about the evaluators input. Also, the sender knows if the evaluator is going to abort before sending the bad keys, so it leaks nothing.
+        for (int i = 0; i < circuit->num_const_inp_wires; ++i) {
+          intrin_values[i] = _mm_lddqu_si128((__m128i *) (const_inp_keys[i]));
+        }
 
-//         auto t5 = GET_TIME();
-//         curr_and_gate = 0;
-//         for (int i = 0; i < circuit->num_gates; ++i) {
-//           g = circuit->gates[i];
-//           if (g.type == NOT) {
-//             intrin_values[g.out_wire] = intrin_values[g.left_wire];
-//           } else if (g.type == XOR) {
-//             intrin_values[g.out_wire] = _mm_xor_si128(intrin_values[g.left_wire], intrin_values[g.right_wire]);
-//           } else if (g.type == AND) {
-//             curr_head_pos = (gate_offset + curr_and_gate) * thread_params.num_bucket;
+        for (int i = 0; i < circuit->num_inp_wires; ++i) {
+          curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (inp_offset + i) * thread_params.num_inp_auth;
 
-//             IntrinShiftEvaluateGates(eval_gates, curr_head_pos, intrin_values[g.left_wire], intrin_values[g.right_wire], intrin_values[g.out_wire], eval_gates_ids[curr_head_pos], gh.key_schedule);
+          for (int j = 0; j < thread_params.num_inp_auth; ++j) {
+            if (!IntrinVerifyAuths(eval_auths, curr_auth_inp_head_pos + j, intrin_values[i], eval_auths_ids[curr_auth_inp_head_pos + j], gh.key_schedule)) {
+              std::cout << "Abort: Inp auth fail! " << std::endl;
+              throw std::runtime_error("Abort: Inp auth fail!");
+            }
+          }
+        }
 
-//             all_equal = true;
-//             for (int j = 1; j < thread_params.num_bucket; ++j) {
-//               IntrinShiftEvaluateGates(eval_gates, curr_head_pos + j, intrin_values[g.left_wire], intrin_values[g.right_wire], intrin_outs[j - 1], eval_gates_ids[curr_head_pos + j], gh.key_schedule);
-//               all_equal &= compare128(intrin_values[g.out_wire], intrin_outs[j - 1]);
-//             }
+/////////////////////////////// DEBUG Input buckets////////////////////////////
+#ifdef DEBUG_SOLDERINGS_INP_BUCKETS
+        __m128i out_keys[2];
+        for (int i = 0; i < circuit->num_const_inp_wires / 2; ++i) {
+          int curr_inp_gate_head = params.num_pre_gates * params.num_bucket + (inp_gate_offset + i) * params.num_inp_bucket;
+          IntrinShiftEvaluateGates(eval_gates, curr_inp_gate_head, intrin_values[i], intrin_values[circuit->num_const_inp_wires / 2 + i], out_keys[0], eval_gates_ids[curr_inp_gate_head], gh.key_schedule);
 
-//             if (!all_equal) {
-//               std::cout << "all outputs not equal for " << curr_and_gate << std::endl;
-//               std::fill(bucket_score, bucket_score + thread_params.num_bucket * sizeof(uint32_t), 0);
-//               intrin_outs[thread_params.num_bucket - 1] = intrin_values[g.out_wire]; //now all keys are in intrin_outs.
-//               intrin_auths[0] = intrin_outs[0];
-//               ++bucket_score[0];
-//               int candidates = 1;
-//               for (int j = 1; j < thread_params.num_bucket; ++j) {
-//                 int comp = 0;
-//                 for (int k = 0; k < candidates; k++) {
-//                   comp = !compare128(intrin_outs[j], intrin_outs[k]);
-//                   if (comp == 0) {
-//                     ++bucket_score[k];
-//                     break;
-//                   }
-//                 }
-//                 if (comp != 0) {
-//                   intrin_auths[candidates] = intrin_outs[j];
-//                   ++candidates;
-//                 }
-//               }
+          for (int j = 1; j < params.num_inp_bucket; ++j) {
+            IntrinShiftEvaluateGates(eval_gates, curr_inp_gate_head + j, intrin_values[i], intrin_values[circuit->num_const_inp_wires / 2 + i], out_keys[1], eval_gates_ids[curr_inp_gate_head + j], gh.key_schedule);
+            if (!compare128(out_keys[0], out_keys[1])) {
+              std::cout << "input gate fail pos:" << i << std::endl;
+            }
+          }
+        }
+#endif
+/////////////////////////////// DEBUG Input buckets////////////////////////////
 
-//               //Check the candidates
-//               for (int j = 0; j < thread_params.num_auth; j++) {
-//                 curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (inp_offset + curr_and_gate) * thread_params.num_inp_auth;
+        auto t5 = GET_TIME();
+        curr_and_gate = 0;
+        for (int i = 0; i < circuit->num_gates; ++i) {
+          g = circuit->gates[i];
+          if (g.type == NOT) {
+            intrin_values[g.out_wire] = intrin_values[g.left_wire];
+          } else if (g.type == XOR) {
+            intrin_values[g.out_wire] = _mm_xor_si128(intrin_values[g.left_wire], intrin_values[g.right_wire]);
+          } else if (g.type == AND) {
+            curr_head_pos = (gate_offset + curr_and_gate) * thread_params.num_bucket;
 
-//                 for (uint32_t k = 0; k < candidates; k++) {
-//                   int res = IntrinVerifyAuths(eval_auths, curr_auth_inp_head_pos + k, intrin_auths[k], eval_auths_ids[curr_auth_inp_head_pos + k], gh.key_schedule);
-//                   if (res == 1) { // The key is good
-//                     ++bucket_score[k];
-//                   }
-//                 }
-//               }
-//               // Find the winner
-//               int winner_idx = -1;
-//               int curr_high_score = -1;
-//               for (int j = 0; j < candidates; j++) {
-//                 if (bucket_score[j] > curr_high_score) {
-//                   winner_idx = j;
-//                   curr_high_score = bucket_score[j];
-//                 }
-//               }
+            IntrinShiftEvaluateGates(eval_gates, curr_head_pos, intrin_values[g.left_wire], intrin_values[g.right_wire], intrin_values[g.out_wire], eval_gates_ids[curr_head_pos], gh.key_schedule);
 
-//               intrin_values[g.out_wire] = intrin_auths[winner_idx];
-//             }
-//             ++curr_and_gate;
-//           }
-//         }
+            all_equal = true;
+            for (int j = 1; j < thread_params.num_bucket; ++j) {
+              IntrinShiftEvaluateGates(eval_gates, curr_head_pos + j, intrin_values[g.left_wire], intrin_values[g.right_wire], intrin_outs[j - 1], eval_gates_ids[curr_head_pos + j], gh.key_schedule);
+              all_equal &= compare128(intrin_values[g.out_wire], intrin_outs[j - 1]);
+            }
 
-//         for (int i = 0; i < circuit->num_out_wires; ++i) {
-//           curr_output = (out_offset + i);
-//           ot_commit_block = curr_output / thread_params.num_pre_outputs;
-//           commit_id = thread_params.out_lsb_blind_start + curr_output % thread_params.num_pre_outputs;
+            if (!all_equal) {
+              std::cout << "all outputs not equal for " << curr_and_gate << std::endl;
 
-//           std::copy(commit_recs[ot_commit_block]->commit_shares[commit_id], commit_recs[ot_commit_block]->commit_shares[commit_id + 1], eval_computed_shares_out + i * CODEWORD_BYTES);
+              std::fill(bucket_score, bucket_score + thread_params.num_bucket * sizeof(uint32_t), 0);
+              intrin_outs[thread_params.num_bucket - 1] = intrin_values[g.out_wire]; //now all keys are in intrin_outs.
+              intrin_auths[0] = intrin_outs[0];
+              ++bucket_score[0];
+              int candidates = 1;
+              for (int j = 1; j < thread_params.num_bucket; ++j) {
+                int comp = 0;
+                for (int k = 0; k < candidates; k++) {
+                  comp = !compare128(intrin_outs[j], intrin_outs[k]);
+                  if (comp == 0) {
+                    ++bucket_score[k];
+                    break;
+                  }
+                }
+                if (comp != 0) {
+                  intrin_auths[candidates] = intrin_outs[j];
+                  ++candidates;
+                }
+              }
 
-//           //Add the output key
-//           curr_output_pos = (gate_offset + circuit->num_and_gates - circuit->num_out_wires + i) * thread_params.num_bucket;
-//           eval_gates_to_blocks.GetExecIDAndIndex(curr_output_pos, curr_output_block, curr_output_idx);
+              //Check the candidates
+              for (int j = 0; j < thread_params.num_auth; j++) {
+                curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (inp_offset + curr_and_gate) * thread_params.num_inp_auth;
 
-//           XOR_CodeWords(eval_computed_shares_out + i * CODEWORD_BYTES, commit_recs[curr_output_block]->commit_shares[thread_params.out_keys_start + curr_output_idx]);
-//         }
+                for (uint32_t k = 0; k < candidates; k++) {
+                  int res = IntrinVerifyAuths(eval_auths, curr_auth_inp_head_pos + k, intrin_auths[k], eval_auths_ids[curr_auth_inp_head_pos + k], gh.key_schedule);
+                  if (res == 1) { // The key is good
+                    ++bucket_score[k];
+                  }
+                }
+              }
+              // Find the winner
+              int winner_idx = -1;
+              int curr_high_score = -1;
+              for (int j = 0; j < candidates; j++) {
+                if (bucket_score[j] > curr_high_score) {
+                  winner_idx = j;
+                  curr_high_score = bucket_score[j];
+                }
+              }
 
-//         thread_params.chan.ReceiveBlocking(decommit_shares_out_0, num_receiving_bytes_out);
+              intrin_values[g.out_wire] = intrin_auths[winner_idx];
+            }
+            ++curr_and_gate;
+          }
+        }
 
-//         if (!VerifyDecommits(decommit_shares_out_0, decommit_shares_out_1, eval_computed_shares_out, out_decommit_values, rot_choices.get(), commit_recs[exec_id]->code.get(), circuit->num_out_wires)) {
-//           throw std::runtime_error("Abort: Wrong eval keys sent!");
-//         }
+        // for (int i = 0; i < circuit->num_out_wires; ++i) {
+        //   curr_output = (out_offset + i);
+        //   ot_commit_block = curr_output / thread_params.num_pre_outputs;
+        //   commit_id = thread_params.out_lsb_blind_start + curr_output % thread_params.num_pre_outputs;
 
-//         auto t6 = GET_TIME();
-//         for (int i = 0; i < circuit->num_out_wires; ++i) {
-//           SetBit(i, GetLSB(out_decommit_values + i * CSEC_BYTES) ^ GetBit(out_offset + i, verleak_bits.get()) ^ GetLSB(intrin_values[circuit->num_wires - circuit->num_out_wires + i]), eval_outputs);
-//         }
+        //   std::copy(commit_shares[ot_commit_block][commit_id], commit_shares[ot_commit_block][commit_id + 1], eval_computed_shares_out + i * CODEWORD_BYTES);
 
-//         auto t7 = GET_TIME();
+        //   //Add the output key
+        //   curr_output_pos = (gate_offset + circuit->num_and_gates - circuit->num_out_wires + i) * thread_params.num_bucket;
+        //   eval_gates_to_blocks.GetExecIDAndIndex(curr_output_pos, curr_output_block, curr_output_idx);
 
-//         delete[] ot_input;
-//         delete[] intrin_values;
+        //   XOR_CodeWords(eval_computed_shares_out + i * CODEWORD_BYTES, commit_recs[curr_output_block]->commit_shares[thread_params.out_keys_start + curr_output_idx]);
+        // }
 
-// #ifdef TINY_PRINT
-//         //Could also report average as in preprocessing
-//         if ((exec_id == 0) && (c == 0)) {
-//           PRINT_TIME_NANO(t0, t_0, "inp_prep");
-//           PRINT_TIME_NANO(t, t0, "commit_share");
-//           PRINT_TIME_NANO(t2, t, "key_wait");
-//           PRINT_TIME_NANO(t3, t2, "commit");
-//           PRINT_TIME_NANO(t4, t3, "eval inp");
-//           PRINT_TIME_NANO(t5, t4, "const inp");
-//           PRINT_TIME_NANO(t6, t5, "eval circ");
-//           PRINT_TIME_NANO(t7, t6, "output decoding");
-//         }
-// #endif
-//       }
-//     });
-//   }
+        // thread_params.chan.ReceiveBlocking(decommit_shares_out_0, num_receiving_bytes_out);
 
-//   for (std::future<void>& r : online_execs_finished) {
-//     r.wait();
-//   }
+        // if (!VerifyDecommits(decommit_shares_out_0, decommit_shares_out_1, eval_computed_shares_out, out_decommit_values, rot_choices.get(), commit_recs[exec_id]->code.get(), circuit->num_out_wires)) {
+        //   throw std::runtime_error("Abort: Wrong eval keys sent!");
+        // }
 
-// #ifdef PRINT_COM
-//   uint64_t bytes_received = params.chan.GetCurrentBytesReceived();
-//   uint64_t bytes_sent = params.chan.GetCurrentBytesSent();
+        // auto t6 = GET_TIME();
+        // for (int i = 0; i < circuit->num_out_wires; ++i) {
+        //   SetBit(i, GetLSB(out_decommit_values + i * CSEC_BYTES) ^ GetBit(out_offset + i, verleak_bits.get()) ^ GetLSB(intrin_values[circuit->num_wires - circuit->num_out_wires + i]), eval_outputs);
+        // }
 
-//   params.chan.ResetReceivedBytes();
-//   params.chan.ResetSentBytes();
-//   for (std::unique_ptr<Params>& thread_params : thread_params_vec) {
-//     bytes_received += thread_params.chan.GetCurrentBytesReceived();
-//     bytes_sent += thread_params.chan.GetCurrentBytesSent();
+        // auto t7 = GET_TIME();
 
-//     thread_params.chan.ResetReceivedBytes();
-//     thread_params.chan.ResetSentBytes();
-//   }
-//   std::cout << "Received " << bytes_received << " Bytes" << std::endl;
-//   std::cout << "Sent " << bytes_sent << " Bytes" << std::endl;
-// #endif
+        // delete[] ot_input;
+        delete[] intrin_values;
+
+#ifdef TINY_PRINT
+        //Could also report average as in preprocessing
+        if ((exec_id == 0) && (c == 0)) {
+          PRINT_TIME_NANO(t0, t_0, "inp_prep");
+          PRINT_TIME_NANO(t, t0, "commit_share");
+          PRINT_TIME_NANO(t2, t, "key_wait");
+          PRINT_TIME_NANO(t3, t2, "commit");
+          PRINT_TIME_NANO(t4, t3, "eval inp");
+          PRINT_TIME_NANO(t5, t4, "const inp");
+          PRINT_TIME_NANO(t6, t5, "eval circ");
+          PRINT_TIME_NANO(t7, t6, "output decoding");
+        }
+#endif
+      }
+    });
+  }
+
+  for (std::future<void>& r : online_execs_finished) {
+    r.wait();
+  }
+
+#ifdef PRINT_COM
+  uint64_t bytes_received = params.chan.GetCurrentBytesReceived();
+  uint64_t bytes_sent = params.chan.GetCurrentBytesSent();
+
+  params.chan.ResetReceivedBytes();
+  params.chan.ResetSentBytes();
+  for (std::unique_ptr<Params>& thread_params : thread_params_vec) {
+    bytes_received += thread_params.chan.GetCurrentBytesReceived();
+    bytes_sent += thread_params.chan.GetCurrentBytesSent();
+
+    thread_params.chan.ResetReceivedBytes();
+    thread_params.chan.ResetSentBytes();
+  }
+  std::cout << "Received " << bytes_received << " Bytes" << std::endl;
+  std::cout << "Sent " << bytes_sent << " Bytes" << std::endl;
+#endif
 }
 
 //The below function is essentially a mix of the three CommitRec member functions ConsistencyCheck, BatchDecommit and VerifyTransposedDecommits.

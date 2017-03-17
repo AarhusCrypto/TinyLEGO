@@ -35,6 +35,10 @@ public:
   std::unique_ptr<uint8_t[]> verleak_bits;
   std::unique_ptr<uint8_t[]> raw_eval_data;
   std::unique_ptr<uint32_t[]> raw_eval_ids;
+
+  osuCrypto::BitVector global_dot_choices;
+  osuCrypto::BitVector global_dot_lsb;
+  BYTEArrayVector global_input_masks;
   
   std::vector<BYTEArrayVector> commit_shares;  
 
