@@ -1,5 +1,4 @@
 #TinyLEGO Implementation
-
 This is the C++14 implementation of the modified TinyLEGO [1] protocol appearing in the paper "Constant Round Maliciously Secure 2PC with Function-independent Preprocessing using LEGO" [2]. The code has been authored by Roberto Trifiletti and builds on the [SplitCommit](https://github.com/AarhusCrypto/SplitCommit) implementation of the FJNT16 additively homomorphic commitment scheme [3].
 
 ##Description
