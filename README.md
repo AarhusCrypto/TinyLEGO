@@ -1,9 +1,5 @@
 #TinyLEGO Implementation
-
-This is the C++14 implementation of the modified TinyLEGO [1] protocol appearing in the paper "Constant Round Maliciously Secure 2PC with Function-independent Preprocessing using LEGO" [2]. The code has been authored by Roberto Trifiletti and builds on the [OTExtension](https://github.com/encryptogroup/OTExtension) implementation of the ALSZ15 protocol [3] and uses the PRG code of [APRICOT](https://github.com/bristolcrypto/apricot). Also, the code of the OTExtension library in this project has been modified slightly to support extension of globally correlated random OTs (Delta-ROTs).
-
-The codebase also contains a (more or less) stand-alone implementation of the recent additively homomorphic commitment scheme of [4].
-
+This is the C++14 implementation of the modified TinyLEGO [1] protocol appearing in the paper "Constant Round Maliciously Secure 2PC with Function-independent Preprocessing using LEGO" [2]. The code has been authored by Roberto Trifiletti and builds on the [SplitCommit](https://github.com/AarhusCrypto/SplitCommit) implementation of the FJNT16 additively homomorphic commitment scheme [3].
 
 ##Description
 The implementation was written with the purpose of exploring the practical efficiency of the TinyLEGO protocol for general secure two-party computation (2PC). It should therefore be treated as a prototype and we make no claim about actual security guarantees for any real world use cases. The code includes main and test functions that exhibit how to use the underlying commitment and 2PC code can be used. Included is also circuit representations of common cryptographic functions (available from https://www.cs.bris.ac.uk/Research/CryptographySecurity/MPC/) that are typically used for benchmarking MPC protocols.
@@ -21,9 +17,6 @@ The code has been tested to work on MAC OSX 10.11 (El Capitan), macOS 10.12 (Sie
 * Required packages:
     * make
     * cmake
-    * libssl-dev ([OpenSSL](https://www.openssl.org) for OTX code)
-    * libgmp-dev ([GMP](https://gmplib.org) for arbitrary-precision arithmetic)
-    * libzmq3-dev ([ZeroMQ](http://zeromq.org) for networking)
 
 The above can be installed via a package manager, i.e. apt on Ubuntu, yum on Amazon Linux and Homebrew on OSX are typical.
 
@@ -41,6 +34,4 @@ The above code precomputes enough AND gates for 100 secure computations of AES-1
 
 * [2] J. B. Nielsen, T. Schneider, R. Trifiletti, "Constant Round Maliciously Secure 2PC with Function-independent Preprocessing using LEGO", to appear at The Network and Distributed System Security Symposium (NDSS) 2017.
 
-* [3] G. Asharov, Y. Lindell, T. Schneider, M. Zohner, "More Efficient Oblivious Transfer Extensions with Security for Malicious Adversaries", in EUROCRYPT 2015, Part I, ser. LNCS, E. Oswald and M. Fischlin, Eds., vol. 9056. Springer, Apr. 2015, pp. 673–701.
-
-* [4] T. K. Frederiksen, T. P. Jakobsen, J. B. Nielsen, R. Trifiletti, “On the Complexity of Additively Homomorphic UC commitments,” in TCC 2016-A, Part I, ser. LNCS, E. Kushilevitz and T. Malkin, Eds., vol. 9562. Springer, Jan. 2016, pp. 542–565.
+* [3] T. K. Frederiksen, T. P. Jakobsen, J. B. Nielsen, R. Trifiletti, “On the Complexity of Additively Homomorphic UC commitments,” in TCC 2016-A, Part I, ser. LNCS, E. Kushilevitz and T. Malkin, Eds., vol. 9562. Springer, Jan. 2016, pp. 542–565.
