@@ -909,15 +909,14 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
         BYTEArrayVector const_inp_keys(circuit->num_const_inp_wires, CSEC_BYTES);
         BYTEArrayVector eval_inp_keys(circuit->num_eval_inp_wires, CSEC_BYTES);
 
-        uint32_t num_receiving_bytes_inp = circuit->num_const_inp_wires * CSEC_BYTES + circuit->num_eval_inp_wires * (CODEWORD_BYTES + CSEC_BYTES);
-        uint32_t num_receiving_bytes_out = circuit->num_out_wires * (CODEWORD_BYTES + CSEC_BYTES);
-
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
           curr_input = (inp_offset + i);
           XORBit(i, GetBit(i, eval_input), global_dot_choices[curr_input], e.data());
         }
 
-        exec_channels[exec_id]->asyncSendCopy(e);
+        if (circuit->num_eval_inp_wires != 0) {
+          exec_channels[exec_id]->asyncSendCopy(e);
+        }
 
         __m128i* intrin_values = new __m128i[circuit->num_wires]; //using raw pointer due to ~25% increase in overall performance. Since the online phase is so computationally efficient even the slightest performance hit is immediately seen. It does not matter in the others phases as they operation on a very different running time scale.
 
@@ -938,12 +937,15 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
           }
         }
 
-        exec_channels[exec_id]->recv(const_inp_keys.data(), const_inp_keys.size());
+        if (circuit->num_const_inp_wires != 0) {
+          exec_channels[exec_id]->recv(const_inp_keys.data(), const_inp_keys.size());
+        }
 
-        //Send output decommits
-        if (!commit_receivers[exec_id].Decommit(eval_computed_shares_inp, eval_inp_keys, *exec_channels[exec_id])) {
-          std::cout << "Abort: Inp Decommit fail! " << std::endl;
-          throw std::runtime_error("Abort: Inp Decommit fail!");
+        if (circuit->num_eval_inp_wires != 0) {
+          if (!commit_receivers[exec_id].Decommit(eval_computed_shares_inp, eval_inp_keys, *exec_channels[exec_id])) {
+            std::cout << "Abort: Inp Decommit fail! " << std::endl;
+            throw std::runtime_error("Abort: Inp Decommit fail!");
+          }
         }
 
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {

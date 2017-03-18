@@ -187,64 +187,37 @@ int main(int argc, const char* argv[]) {
   //Compute the required number of params that are to be created. We create one main param and one for each sub-thread that will be spawned later on. Need to know this at this point to setup context properly
   int num_params = std::max(pre_num_execs, offline_num_execs);
   num_params = std::max(num_params, online_num_execs);
-  zmq::context_t context(NUM_IO_THREADS, 2 * (num_params + 1)); //We need two sockets pr. channel
 
   //Setup the main params object
-  Params params(constant_seeds[0], num_gates, num_inputs, num_outputs, ip_address, (uint16_t) port, 0, context, pre_num_execs, GLOBAL_PARAMS_CHAN, optimize_online);
+  Params params(num_gates, num_inputs, num_outputs, num_params);
 
-  TinyConstructor tiny_const(params);
+  TinyConstructor tiny_const(tiny_constant_seeds[0], params);
 
-  //Warm up network!
-  uint8_t* dummy_val = new uint8_t[network_dummy_size]; //50 MB
-  uint8_t* dummy_val_rec = new uint8_t[network_dummy_size]; //50 MB
-  channel chan(OT_ADMIN_CHANNEL - 1, tiny_const.ot_snd.net.rcvthread, tiny_const.ot_snd.net.sndthread);
-  chan.send(dummy_val, network_dummy_size);
-  uint8_t* dummy_val_rec2 = chan.blocking_receive();
-  params.chan.Send(dummy_val, network_dummy_size);
-  params.chan.ReceiveBlocking(dummy_val_rec2, network_dummy_size);
-  params.chan.bytes_received_vec[params.chan.received_pointer] = 0;
-  params.chan.bytes_sent_vec[params.chan.sent_pointer] = 0;
-  tiny_const.ot_snd.net.m_vSocket->m_nSndCount = 0;
-  tiny_const.ot_snd.net.m_vSocket->m_nRcvCount = 0;
-  delete[] dummy_val;
-  delete[] dummy_val_rec;
-  free(dummy_val_rec2);
-  //Warm up network!
+  tiny_const.Connect(ip_address, (uint16_t) port);
+
+  std::cout << "====== " << num_iters << " x " << circuit_name << " ======" << std::endl;
+
+  //Values used for network syncing after each phase
+  uint8_t rcv;
+  uint8_t snd;
 
   //Run initial Setup (BaseOT) phase
   auto setup_begin = GET_TIME();
-  mr_init_threading(); //Needed for Miracl library to work with threading.
   tiny_const.Setup();
-  mr_end_threading();
   auto setup_end = GET_TIME();
 
-  uint64_t setup_sent = params.chan.GetTotalBytesSent() + tiny_const.ot_snd.net.m_vSocket->getSndCnt();
-  for (std::unique_ptr<Params>& thread_params : tiny_const.thread_params_vec) {
-    setup_sent += thread_params->chan.GetTotalBytesSent();
-  }
+  uint64_t setup_data_sent = tiny_const.GetTotalDataSent();
 
   //Run Preprocessing phase
   auto preprocess_begin = GET_TIME();
   tiny_const.Preprocess();
   auto preprocess_end = GET_TIME();
 
-  uint64_t preprocess_sent = params.chan.GetTotalBytesSent() + tiny_const.ot_snd.net.m_vSocket->getSndCnt();
-  for (std::unique_ptr<Params>& thread_params : tiny_const.thread_params_vec) {
-    preprocess_sent += thread_params->chan.GetTotalBytesSent();
-  }
-  preprocess_sent -= setup_sent;
+  //Sync with Evaluator
+  tiny_const.chan->recv(&rcv, 1);
+  tiny_const.chan->send(&snd, 1);
 
-  //Preprocessing creates pre_num_execs sub-param objects. If more are needed in the offline and online phases we create them here.
-  int extra_execs = num_params - params.num_execs;
-  if (extra_execs < 0) {
-  } else {
-    std::unique_ptr<uint8_t[]> extra_thread_seeds(std::make_unique<uint8_t[]>(extra_execs * CSEC_BYTES));
-    tiny_const.params.rnd.GenRnd(extra_thread_seeds.get(), extra_execs * CSEC_BYTES);
-    for (int i = 0; i < extra_execs; ++i) {
-      tiny_const.thread_params_vec.emplace_back(std::make_unique<Params>(tiny_const.params, extra_thread_seeds.get() + i * CSEC_BYTES, tiny_const.thread_params_vec[0]->num_pre_gates, tiny_const.thread_params_vec[0]->num_pre_inputs, tiny_const.thread_params_vec[0]->num_pre_outputs, params.num_execs + i));
-      tiny_const.commit_snds.emplace_back(std::make_unique<CommitSender>(*tiny_const.thread_params_vec[params.num_execs + i], tiny_const.rot_seeds0.get(), tiny_const.rot_seeds1));
-    }
-  }
+  uint64_t preprocess_data_sent = tiny_const.GetTotalDataSent() - setup_data_sent;
 
   // Figure out how many executions to run in offline phase
   int top_num_execs = std::min((int)circuits.size(), offline_num_execs);
@@ -259,11 +232,11 @@ int main(int argc, const char* argv[]) {
   tiny_const.Offline(circuits, top_num_execs);
   auto offline_end = GET_TIME();
 
-  uint64_t offline_sent = params.chan.GetTotalBytesSent() + tiny_const.ot_snd.net.m_vSocket->getSndCnt();
-  for (std::unique_ptr<Params>& thread_params : tiny_const.thread_params_vec) {
-    offline_sent += thread_params->chan.GetTotalBytesSent();
-  }
-  offline_sent -= (setup_sent + preprocess_sent);
+  //Sync with Evaluator
+  tiny_const.chan->recv(&rcv, 1);
+  tiny_const.chan->send(&snd, 1);
+
+  uint64_t offline_data_sent = tiny_const.GetTotalDataSent() - setup_data_sent - preprocess_data_sent;
 
   // If we are doing single evaluation then we have slightly better performance with a single thread running in the thread pool.
   int eval_num_execs = std::min((int)circuits.size(), online_num_execs);
@@ -276,11 +249,11 @@ int main(int argc, const char* argv[]) {
   tiny_const.Online(circuits, const_inputs, eval_num_execs);
   auto online_end = GET_TIME();
 
-  uint64_t online_sent = params.chan.GetTotalBytesSent() + tiny_const.ot_snd.net.m_vSocket->getSndCnt();
-  for (std::unique_ptr<Params>& thread_params : tiny_const.thread_params_vec) {
-    online_sent += thread_params->chan.GetTotalBytesSent();
-  }
-  online_sent -= (setup_sent + preprocess_sent + offline_sent);
+  //Sync with Evaluator
+  tiny_const.chan->recv(&rcv, 1);
+  tiny_const.chan->send(&snd, 1);
+
+  uint64_t online_data_sent = tiny_const.GetTotalDataSent() - setup_data_sent - preprocess_data_sent - offline_data_sent;
 
   // Average out the timings of each phase and print results
   uint64_t setup_time_nano = std::chrono::duration_cast<std::chrono::nanoseconds>(setup_end - setup_begin).count();
@@ -288,12 +261,10 @@ int main(int argc, const char* argv[]) {
   uint64_t offline_time_nano = std::chrono::duration_cast<std::chrono::nanoseconds>(offline_end - offline_begin).count();
   uint64_t online_time_nano = std::chrono::duration_cast<std::chrono::nanoseconds>(online_end - online_begin).count();
 
-  std::cout << "===== Const timings for " << num_iters << " x " << circuit_file_name << "(" << (num_iters * circuit.num_and_gates) << ") with " << pre_num_execs << " preprocessing execs, " << top_num_execs << " offline execs and " << eval_num_execs << " online execs =====" << std::endl;
-
-  std::cout << "Setup ms: " << (double) setup_time_nano / num_iters / 1000000 << ", data sent: " << (double) setup_sent / 1000 << " (" << (double) setup_sent / num_iters / 1000 << ")" << " kB" << std::endl;
-  std::cout << "Preprocess ms: " << (double) preprocess_time_nano / num_iters / 1000000 << ", data sent: " << (double) preprocess_sent / 1000 << " (" << (double) preprocess_sent / num_iters / 1000 << ")" << " kB" << std::endl;
-  std::cout << "Offline ms: " << (double) offline_time_nano / num_iters / 1000000 << ", data sent: " << (double) offline_sent / 1000 << " (" << (double) offline_sent / num_iters / 1000 << ")" << " kB" << std::endl;
-  std::cout << "Online ms: " << (double) online_time_nano / num_iters / 1000000 << ", data sent: " << (double) online_sent / 1000 << " (" << (double) online_sent / num_iters / 1000 << ")" << " kB" << std::endl;
+  std::cout << "Setup ms: " << (double) setup_time_nano / num_iters / 1000000 << ", data sent: " << (double) setup_data_sent / num_iters / 1000 << " kB" << std::endl;
+  std::cout << "Preprocess ms: " << (double) preprocess_time_nano / num_iters / 1000000 << ", data sent: " << (double) preprocess_data_sent / num_iters / 1000 << " kB" << std::endl;
+  std::cout << "Offline ms: " << (double) offline_time_nano / num_iters / 1000000 << ", data sent: " << (double) offline_data_sent / num_iters / 1000 << " kB" << std::endl;
+  std::cout << "Online ms: " << (double) online_time_nano / num_iters / 1000000 << ", data sent: " << (double) online_data_sent / num_iters / 1000 << " kB" << std::endl;
 
   return 0;
 }

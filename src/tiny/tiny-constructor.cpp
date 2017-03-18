@@ -975,9 +975,6 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
 
         BYTEArrayVector e(BITS_TO_BYTES(circuit->num_eval_inp_wires), 1);
 
-        uint32_t num_send_bytes_inp = circuit->num_const_inp_wires * CSEC_BYTES +  circuit->num_eval_inp_wires * (CODEWORD_BYTES + CSEC_BYTES);
-        uint32_t num_send_bytes_out =  circuit->num_out_wires * (CODEWORD_BYTES + CSEC_BYTES);
-
         //Construct const_inp_keys first
         for (int i = 0; i < circuit->num_const_inp_wires; ++i) {
           curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (inp_offset + i) * thread_params.num_inp_auth;
@@ -990,8 +987,9 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
           }
         }
 
-        //Do eval_input based on e
-        exec_channels[exec_id]->recv(e.data(), e.size());
+        if (circuit->num_eval_inp_wires != 0) {
+          exec_channels[exec_id]->recv(e.data(), e.size());
+        }
 
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
           curr_input = (inp_offset + i);
@@ -1018,10 +1016,13 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
           }
         }
 
-        //Send all input keys and decommits
-        SafeAsyncSend(*exec_channels[exec_id], const_inp_keys);
+        if (circuit->num_const_inp_wires != 0) {
+          SafeAsyncSend(*exec_channels[exec_id], const_inp_keys);
+        }
 
-        commit_senders[exec_id].Decommit(decommit_shares_inp, *exec_channels[exec_id]);
+        if (circuit->num_eval_inp_wires != 0) {
+          commit_senders[exec_id].Decommit(decommit_shares_inp, *exec_channels[exec_id]);
+        }
       }
     });
   }
