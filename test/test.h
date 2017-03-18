@@ -1,4 +1,4 @@
-#include "googletest/include/gtest/gtest.h"
+#include "gtest/gtest.h"
 
 //Hardcoded values for testing
 static uint16_t default_port = 28001;

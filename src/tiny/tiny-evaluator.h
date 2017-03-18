@@ -1,10 +1,7 @@
 #ifndef TINY_TINY_TINYEVAL_H_
 #define TINY_TINY_TINYEVAL_H_
 
-#include "tiny/tiny.h"
-
-// #include "dot/alsz-dot-ext-rec.h"
-#include "commit/commit-scheme-rec.h"
+#include "tiny/tiny.h" 
 
 #include "libOTe/TwoChooseOne/KosOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/KosDotExtReceiver.h"

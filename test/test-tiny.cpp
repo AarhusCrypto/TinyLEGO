@@ -7,10 +7,10 @@
 void RunConst(TinyConstructor& tiny_const, std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs) {
 
   tiny_const.Connect(default_ip_address, default_port);
-  tiny_const.Setup();
+  tiny_const.Setup(); 
   tiny_const.Preprocess();
-  tiny_const.Offline(circuits, tiny_const.params.num_execs);
-  tiny_const.Online(circuits, inputs, tiny_const.params.num_execs);
+  tiny_const.Offline(circuits, tiny_const.params.num_max_execs);
+  tiny_const.Online(circuits, inputs, tiny_const.params.num_max_execs);
 
 }
 
@@ -24,8 +24,8 @@ void RunEval(TinyEvaluator& tiny_eval, std::vector<Circuit*>& circuits, std::vec
   tiny_eval.Connect(default_ip_address, default_port);
   tiny_eval.Setup();
   tiny_eval.Preprocess();
-  tiny_eval.Offline(circuits, tiny_eval.params.num_execs);
-  tiny_eval.Online(circuits, inputs, outputs_raw, tiny_eval.params.num_execs);
+  tiny_eval.Offline(circuits, tiny_eval.params.num_max_execs);
+  tiny_eval.Online(circuits, inputs, outputs_raw, tiny_eval.params.num_max_execs);
 
   for (int i = 0; i < circuits.size(); ++i) {
     for (int j = 0; j < circuits[i]->num_out_wires; ++j) {

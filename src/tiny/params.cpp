@@ -1,16 +1,9 @@
 #include "tiny/params.h"
 
-Params::Params(uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, int num_execs, int exec_id, bool optimize_online) :
-// crypt(CSEC, seed),
-num_cpus(std::thread::hardware_concurrency()),
-num_execs(num_execs),
-exec_id(exec_id)
-// context(context),
-// ip_address(ip_address),
-// port(port),
-// net_role(net_role),
-// chan(ip_address, port + exec_id + 1, port + exec_id + 1 + MAX_TOTAL_PARAMS, net_role, context) {
-  {
+Params::Params(uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, int num_max_execs, int exec_id, bool optimize_online) :
+  num_cpus(std::thread::hardware_concurrency()),
+  num_max_execs(num_max_execs),
+  exec_id(exec_id) {
 
   // rnd.SetSeed(seed);
 
@@ -25,7 +18,7 @@ exec_id(exec_id)
       break; //Do not try worse parameters
     }
   }
-  
+
   if (!found) {
     throw std::runtime_error("Insufficient number of garbled gates requested.");
   }
@@ -54,17 +47,9 @@ exec_id(exec_id)
 }
 
 Params::Params(Params& MainParams, uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs, int exec_id) :
-  // crypt(CSEC, seed),
   num_cpus(std::thread::hardware_concurrency()),
-  num_execs(MainParams.num_execs),
-  exec_id(exec_id)
-  // context(MainParams.context),
-  // ip_address(MainParams.ip_address),
-  // port(MainParams.port),
-  // net_role(MainParams.net_role),
-  // chan(ip_address, port + exec_id + 1, port + exec_id + 1 + MAX_TOTAL_PARAMS, net_role, context) {
-  {
-  // rnd.SetSeed(seed);
+  num_max_execs(MainParams.num_max_execs),
+  exec_id(exec_id) {
 
   num_auth = MainParams.num_auth;
   num_bucket = MainParams.num_bucket;
@@ -91,16 +76,13 @@ void Params::ComputeGateAndAuthNumbers(uint64_t num_pre_gates, uint64_t num_pre_
   num_eval_auths = num_pre_gates * num_auth + num_pre_inputs * num_inp_auth;
 
   num_garbled_wires = 3 * Q + A + 1;
-  
+
   left_keys_start = 0;
   right_keys_start = Q;
   out_keys_start = 2 * Q;
   auth_start = 3 * Q;
   delta_pos = 3 * Q + A;
-  ot_chosen_start = 3 * Q + A + 1; //num_pre_inputs + s commits
-
-  // num_OT = num_pre_inputs + SSEC;
-   //k commitments will be used to blind VerLeak in offline phase.
+  ot_chosen_start = 3 * Q + A + 1;
 }
 
 void Params::ComputeCheckFractions() {

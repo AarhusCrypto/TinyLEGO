@@ -1,11 +1,6 @@
 #ifndef TINY_TINY_PARAMS_H_
 #define TINY_TINY_PARAMS_H_
 
-// #include "OTExtension/util/crypto/crypto.h"
-// #include "prg/random.h"
-// #include "tiny-util/network.h"
-// #include "tiny-util/channel.h"
-
 #include "tiny-util/util.h"
 
 class Params {
@@ -16,9 +11,6 @@ public:
   void ComputeCheckFractions();
   void ComputeGateAndAuthNumbers(uint64_t num_pre_gates, uint64_t num_pre_inputs, uint64_t num_pre_outputs);
 
-  // crypto crypt;
-  // PRNG rnd;
-  
   uint64_t delta_pos;
   uint64_t num_pre_gates;
   uint64_t num_pre_inputs;
@@ -44,7 +36,7 @@ public:
   double s_g;
   double q_a;
   double q_g;
-  
+
   uint64_t Q;
   uint64_t A;
   uint64_t num_garbled_wires;
@@ -59,14 +51,9 @@ public:
 
   //Non-Protocol related
   int num_cpus;
-  int num_execs;
+  int num_max_execs;
   int exec_id;
-  
-  // std::string ip_address;
-  // uint16_t port;
-  // uint8_t net_role;
-  // zmq::context_t& context;
-  // Channel chan;
+
 };
 
 #endif /* TINY_TINY_PARAMS_H_ */

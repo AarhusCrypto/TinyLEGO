@@ -24,6 +24,8 @@ public:
   virtual void Setup() = 0;
   virtual void Preprocess() = 0;
   virtual void Offline(std::vector<Circuit*>& circuits, int top_num_execs) = 0;
+
+  uint64_t GetTotalDataSent();
   
   Params& params;
   ctpl::thread_pool thread_pool;

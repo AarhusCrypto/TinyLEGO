@@ -3,9 +3,6 @@
 
 #include "tiny/tiny.h"
 
-// #include "dot/alsz-dot-ext-snd.h"
-#include "commit/commit-scheme-snd.h"
-
 #include "libOTe/TwoChooseOne/KosOtExtSender.h"
 #include "libOTe/TwoChooseOne/KosDotExtSender.h"
 #include "split-commit/split-commit-snd.h"

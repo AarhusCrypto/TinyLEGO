@@ -6,8 +6,8 @@ TinyEvaluator::TinyEvaluator(uint8_t seed[], Params& params) :
   raw_eval_ids(std::make_unique<uint32_t[]>(params.num_eval_gates + params.num_eval_auths)),
   commit_seed_OTs(CODEWORD_BITS),
   commit_seed_choices(CODEWORD_BITS),
-  commit_receivers(params.num_execs),
-  commit_shares(params.num_execs),
+  commit_receivers(params.num_max_execs),
+  commit_shares(params.num_max_execs),
   global_dot_choices(params.num_pre_inputs),
   global_dot_lsb(params.num_pre_inputs),
   global_input_masks(params.num_pre_inputs, CSEC_BYTES),
@@ -50,11 +50,6 @@ void TinyEvaluator::Connect(std::string ip_address, uint16_t port) {
 }
 
 void TinyEvaluator::Setup() {
-  // ot_rec.net.m_vSocket->ResetSndCnt();
-  // ot_rec.net.m_vSocket->ResetRcvCnt();
-  //============================Run DOT========================================
-  auto baseOT_begin = GET_TIME();
-  // ot_rec.InitOTReceiver();
 
   //BaseOTs
   osuCrypto::u64 num_base_OTs = CSEC + SSEC;
@@ -100,33 +95,20 @@ void TinyEvaluator::Setup() {
 
   tmp_receiver.SetSeedOTs(string_msgs, string_choices);
   tmp_receiver.GetCloneReceivers(commit_receivers.size(), rnd, commit_receivers, exec_rnds);
-
-  auto baseOT_end = GET_TIME();
-
-#ifdef TINY_PRINT
-  PRINT_TIME(baseOT_end, baseOT_begin, "BASEOT");
-#endif
 }
 
 void TinyEvaluator::Preprocess() {
 
-  std::vector<std::vector<std::chrono::duration<long double, std::milli>>> durations(EVAL_NUM_TIMINGS);
-
-  for (std::vector<std::chrono::duration<long double, std::milli>>& duration : durations) {
-    duration.resize(params.num_execs);
-  }
-
-  //=============================Run Commit====================================
   //Containers for holding pointers to objects used in each exec. For future use
-  std::vector<std::future<void>> cnc_execs_finished(params.num_execs);
+  std::vector<std::future<void>> cnc_execs_finished(params.num_max_execs);
   std::vector<std::unique_ptr<bool>> thread_ver_successes;
 
   //Split the number of preprocessed gates and inputs into num_execs executions
   std::vector<int> inputs_from, inputs_to, outputs_from, outputs_to, gates_from, gates_to, gates_inputs_from, gates_inputs_to;
-  PartitionBufferFixedNum(inputs_from, inputs_to, params.num_execs, params.num_pre_inputs);
-  PartitionBufferFixedNum(gates_inputs_from, gates_inputs_to, params.num_execs, params.num_pre_inputs / 2);
-  PartitionBufferFixedNum(outputs_from, outputs_to, params.num_execs, params.num_pre_outputs);
-  PartitionBufferFixedNum(gates_from, gates_to, params.num_execs, params.num_pre_gates);
+  PartitionBufferFixedNum(inputs_from, inputs_to, params.num_max_execs, params.num_pre_inputs);
+  PartitionBufferFixedNum(gates_inputs_from, gates_inputs_to, params.num_max_execs, params.num_pre_inputs / 2);
+  PartitionBufferFixedNum(outputs_from, outputs_to, params.num_max_execs, params.num_pre_outputs);
+  PartitionBufferFixedNum(gates_from, gates_to, params.num_max_execs, params.num_pre_gates);
 
   //Concurrency variables used for ensuring that exec_num 0 has received and updated its global_delta commitment. This is needed as all other executions will use the same commitment to global_delta (in exec_num 0).
   std::mutex cout_mutex;
@@ -157,10 +139,8 @@ void TinyEvaluator::Preprocess() {
   PermuteArray(permuted_eval_gates_ids, params.num_eval_gates, bucket_seeds);
   PermuteArray(permuted_eval_auths_ids, params.num_eval_auths, bucket_seeds + CSEC_BYTES);
 
-  //store last exec_id as this execution performs the Delta-OT CnC step. This step is needed as we need to signal that the last thread execution ensures that the sender indeed committed to the global_delta used in DOT protocol. We do it in the last execution to avoid dealing with any prefix offset for all OT values, ie. we sacrifices the last SSEC OTs.
-
-  //Variable to keep track if execution failed
-  for (int exec_id = 0; exec_id < params.num_execs; ++exec_id) {
+  bool delta_flipped = false;
+  for (int exec_id = 0; exec_id < params.num_max_execs; ++exec_id) {
 
     //Assign pr. exec variables that are passed along to the current execution thread
     int inp_from = inputs_from[exec_id];
@@ -175,14 +155,8 @@ void TinyEvaluator::Preprocess() {
     thread_ver_successes.emplace_back(std::make_unique<bool>(true));
     bool* ver_success = thread_ver_successes[exec_id].get();
 
-    //The delta_holder is fixed and passed to all executions as it is in exec 0 that we commit to the global_delta and all other executions use this commitment when needed
-    // CommitReceiver* delta_holder = commit_recs[0].get();
-
     //Starts the current execution
-    bool delta_flipped = false;
-    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, &delta_flipped, ver_success, inp_from, inp_to, permuted_eval_gates_ids, permuted_eval_auths_ids, &durations] (int id) {
-
-      auto dot_begin = GET_TIME();
+    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, &delta_flipped, ver_success, inp_from, inp_to, permuted_eval_gates_ids, permuted_eval_auths_ids] (int id) {
 
       uint32_t num_ots;
       if (exec_id == 0) {
@@ -204,11 +178,6 @@ void TinyEvaluator::Preprocess() {
       for (int i = 0; i < num_ots; ++i) {
         _mm_storeu_si128((__m128i*) input_masks[i], msgs[i]);
       }
-
-      auto dot_end = GET_TIME();
-
-
-      auto commit_begin = GET_TIME();
 
       commit_shares[exec_id] = BYTEArrayVector(num_commits, CODEWORD_BYTES);
 
@@ -243,10 +212,6 @@ void TinyEvaluator::Preprocess() {
         throw std::runtime_error("Abort, blind lsb decommit failed!");
       }
 
-
-      auto commit_end = GET_TIME();
-      durations[EVAL_COMMIT_TIME][exec_id] = commit_end - commit_begin;
-
       //Put global_delta from OTs in delta_pos of commitment scheme. For security reasons we only do this in exec_num 0, as else a malicious sender might send different delta values in each threaded execution. Therefore only exec_num 0 gets a correction and the rest simply update their delta pointer to point into exec_num 0's delta value.
       std::condition_variable& delta_received_cond_val = std::get<1>(delta_checks);
       bool& delta_received = std::get<2>(delta_checks);
@@ -275,8 +240,6 @@ void TinyEvaluator::Preprocess() {
                   commit_shares[0][thread_params_vec[0].delta_pos + 1],
                   commit_shares[exec_id][thread_params_vec[exec_id].delta_pos]);
       }
-
-      //Store values!
 
       if (delta_flipped) {
         for (int i = 0; i < num_ots; ++i) {
@@ -348,15 +311,7 @@ void TinyEvaluator::Preprocess() {
       }
 //////////////////////////////////////CNC////////////////////////////////////
 
-      // //===========================VER_LEAK====================================
-      auto verleak_begin = GET_TIME();
-
-      auto verleak_end = GET_TIME();
-      durations[EVAL_VERLEAK_TIME][exec_id] = verleak_end - verleak_begin;
-
       //==========================Receive Gates===============================
-      auto receive_gates_auths_begin = GET_TIME();
-
       //Sample the seed used to determine all CNC challenges
       uint8_t cnc_seed[CSEC_BYTES];
       exec_rnds[exec_id].get<uint8_t>(cnc_seed, CSEC_BYTES);
@@ -364,7 +319,6 @@ void TinyEvaluator::Preprocess() {
       //Receive all garbling data. When received we send the CNC challenge seed
       std::unique_ptr<uint8_t[]> raw_garbling_data(std::make_unique<uint8_t[]>(3 * thread_params_vec[exec_id].Q * CSEC_BYTES + 2 * thread_params_vec[exec_id].A * CSEC_BYTES));
       exec_channels[exec_id]->recv(raw_garbling_data.get(), 3 * thread_params_vec[exec_id].Q * CSEC_BYTES + 2 * thread_params_vec[exec_id].A * CSEC_BYTES);
-
 
       exec_channels[exec_id]->asyncSendCopy(cnc_seed, CSEC_BYTES);
 
@@ -378,11 +332,7 @@ void TinyEvaluator::Preprocess() {
       auths_data.H_0 = gates_data.S_O + thread_params_vec[exec_id].Q * CSEC_BYTES;
       auths_data.H_1 = auths_data.H_0 + thread_params_vec[exec_id].A * CSEC_BYTES;
 
-      auto receive_gates_auths_end = GET_TIME();
-      durations[EVAL_RECEIVE_GATES_AUTHS_TIME][exec_id] = receive_gates_auths_end - receive_gates_auths_begin;
-
       //========================Run Cut-and-Choose=============================
-      auto cnc_begin = GET_TIME();
 
       //Sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
       int num_bytes_gates = BITS_TO_BYTES(thread_params_vec[exec_id].Q);
@@ -409,7 +359,6 @@ void TinyEvaluator::Preprocess() {
         out_cnc_input[i] = left_cnc_input[i] & right_cnc_input[i];
       }
       cnc_rand.get<uint8_t>(auth_cnc_input, BITS_TO_BYTES(num_check_auths));
-
 
       //Construct the CNC check shares to be used for later decommit verification.
       int num_checks = 3 * num_check_gates + num_check_auths;
@@ -524,14 +473,11 @@ void TinyEvaluator::Preprocess() {
       }
 
       //Start decommit phase using the above-created indices
-      auto cnc_batch_decommit_begin = GET_TIME();
       if (!commit_receivers[exec_id].BatchDecommit(cnc_computed_shares, all_cnc_keys, exec_rnds[exec_id], *exec_channels[exec_id], true)) {
         std::cout << exec_id << std::endl;
         std::cout << "Wrong keys sent!" << std::endl;
         *ver_success = false;
       }
-      auto cnc_end = GET_TIME();
-      durations[EVAL_CNC_TIME][exec_id] = cnc_end - cnc_begin;
     });
   }
 
@@ -547,10 +493,9 @@ void TinyEvaluator::Preprocess() {
   IDMap eval_gates_to_blocks(eval_gates_ids, thread_params_vec[0].Q + thread_params_vec[0].A, thread_params_vec[0].out_keys_start);
   IDMap eval_auths_to_blocks(eval_auths_ids, thread_params_vec[0].Q + thread_params_vec[0].A, thread_params_vec[0].auth_start);
 
-//Starts params.num_execs parallel executions for preprocessing solderings. We reuse much of the execution specific information from the last parallel executions
-  auto presolder_begin = GET_TIME();
-  std::vector<std::future<void>> pre_soldering_execs_finished(params.num_execs);
-  for (int exec_id = 0; exec_id < params.num_execs; ++exec_id) {
+//Starts params.num_max_execs parallel executions for preprocessing solderings. We reuse much of the execution specific information from the last parallel executions
+  std::vector<std::future<void>> pre_soldering_execs_finished(params.num_max_execs);
+  for (int exec_id = 0; exec_id < params.num_max_execs; ++exec_id) {
     int inp_from = inputs_from[exec_id];
     int inp_to = inputs_to[exec_id];
     int ga_inp_from = gates_inputs_from[exec_id];
@@ -581,7 +526,6 @@ void TinyEvaluator::Preprocess() {
       int solder_auth_pos = 0;
       int solder_inp_auth_pos = 0;
       BYTEArrayVector presolder_computed_shares(num_pre_solderings, CODEWORD_BYTES);
-
 
       //We first loop over all head gates
       for (int i = ga_from; i < ga_to; ++i) {
@@ -700,7 +644,6 @@ void TinyEvaluator::Preprocess() {
   for (std::future<void>& r : pre_soldering_execs_finished) {
     r.wait();
   }
-  auto presolder_end = GET_TIME();
 
 //Check that all executions in both CNC and preprocessed solderings succeeded
   for (std::unique_ptr<bool>& b : thread_ver_successes) {
@@ -708,108 +651,6 @@ void TinyEvaluator::Preprocess() {
       throw std::runtime_error("Abort, initial setup failed. Cheating detected");
     }
   }
-
-/////////////////// DEBUG for testing correctness of solderings//////////////
-#ifdef DEBUG_SOLDERINGS_INP_BUCKETS
-  std::unique_ptr<uint8_t[]> keys_ptr(std::make_unique<uint8_t[]>(CSEC_BYTES * (3 * (params.num_pre_gates + params.num_pre_inputs / 2) + params.num_pre_inputs)));
-  uint8_t* keys = keys_ptr.get();
-  params.chan.ReceiveBlocking(keys, CSEC_BYTES * (3 * (params.num_pre_gates + params.num_pre_inputs / 2) + params.num_pre_inputs));
-  uint8_t out_key[CSEC_BYTES];
-  GarblingHandler gh(*thread_params_vec[0]);
-  uint8_t* left_key;
-  uint8_t* right_key;
-  uint8_t* out_key_correct;
-  uint8_t* auth_key;
-
-  //Test bucket soldering
-  for (int i = 0; i < params.num_pre_gates; ++i) {
-    left_key = keys + i * CSEC_BYTES;
-    right_key = keys + (params.num_pre_gates + i) * CSEC_BYTES;
-    out_key_correct = keys + (2 * params.num_pre_gates + i) * CSEC_BYTES;
-
-    for (int j = 0; j < params.num_bucket; ++j) {
-      int curr_gate_pos = i * params.num_bucket + j;
-      gh.AllShiftEvaluateGates(eval_gates, curr_gate_pos, left_key, right_key, out_key, eval_gates_ids, 1);
-
-      if (!std::equal(out_key, out_key + CSEC_BYTES, out_key_correct)) {
-        std::cout << "gate fail pos:" << i << std::endl;
-      }
-    }
-
-    for (int j = 0; j < params.num_auth; ++j) {
-      int curr_auth_pos = i * params.num_auth + j;
-      if (!gh.AllVerifyAuths(eval_auths, curr_auth_pos, out_key, eval_auths_ids, 1)) {
-        std::cout << "auth fail pos:" << i << std::endl;
-      }
-    }
-  }
-
-  //Test input buckets soldering
-  for (int i = 0; i < params.num_pre_inputs / 2; ++i) {
-    left_key = keys + (3 * params.num_pre_gates + i) * CSEC_BYTES;
-    right_key = keys + (3 * params.num_pre_gates + params.num_pre_inputs / 2 + i) * CSEC_BYTES;
-    out_key_correct = keys + (3 * params.num_pre_gates + 2 * params.num_pre_inputs / 2 + i) * CSEC_BYTES;
-    for (int j = 0; j < params.num_inp_bucket; ++j) {
-      int curr_gate_pos = params.num_pre_gates * params.num_bucket + i * params.num_inp_bucket + j;
-      gh.AllShiftEvaluateGates(eval_gates, curr_gate_pos, left_key, right_key, out_key, eval_gates_ids, 1);
-      if (!std::equal(out_key, out_key + CSEC_BYTES, out_key_correct)) {
-        std::cout << "input gate fail pos:" << i << std::endl;
-      }
-    }
-  }
-
-  //Test input authentication soldering
-  for (int i = 0; i < params.num_pre_inputs; ++i) {
-    auth_key = keys + (3 * params.num_pre_gates + 3 * params.num_pre_inputs / 2 + i) * CSEC_BYTES;
-    for (int j = 0; j < params.num_inp_auth; ++j) {
-      int curr_auth_pos = params.num_pre_gates * params.num_auth + i * params.num_inp_auth + j;
-      if (!gh.AllVerifyAuths(eval_auths, curr_auth_pos, auth_key, eval_auths_ids, 1)) {
-        std::cout << "inp auth fail pos: " << i << std::endl;
-      }
-    }
-  }
-#endif
-/////////////////// DEBUG for testing correctness of solderings//////////////
-
-  auto setup_end = GET_TIME();
-
-#ifdef PRINT_COM
-  uint64_t bytes_received = params.chan.GetCurrentBytesReceived();
-  uint64_t bytes_sent = params.chan.GetCurrentBytesSent();
-
-  params.chan.ResetReceivedBytes();
-  params.chan.ResetSentBytes();
-  for (std::unique_ptr<Params>& thread_params : thread_params_vec) {
-    bytes_received += thread_params.chan.GetCurrentBytesReceived();
-    bytes_sent += thread_params.chan.GetCurrentBytesSent();
-
-    thread_params.chan.ResetReceivedBytes();
-    thread_params.chan.ResetSentBytes();
-  }
-  cout << "OT Received " << ot_rec.net.m_vSocket->getRcvCnt() << " bytes" << endl;
-  cout << "OT Sent " << ot_rec.net.m_vSocket->getSndCnt() << " bytes" << endl;
-
-  std::cout << "Received " << bytes_received << " Bytes" << std::endl;
-  std::cout << "Sent " << bytes_sent << " Bytes" << std::endl;
-#endif
-  std::vector<std::chrono::duration<long double, std::milli>> durations_res(EVAL_NUM_TIMINGS, std::chrono::duration<long double, std::milli>(0));
-
-  for (int i = 0; i < EVAL_NUM_TIMINGS; ++i) {
-    for (int j = 0; j < params.num_execs; ++j)
-    {
-      durations_res[i] += durations[i][j];
-    }
-    durations_res[i] = durations_res[i] / params.num_execs;
-  }
-
-#ifdef TINY_PRINT
-  std::cout << "Avg. Commit: " << durations_res[EVAL_COMMIT_TIME].count() << std::endl;
-  std::cout << "Avg. Verleak: " << durations_res[EVAL_VERLEAK_TIME].count() << std::endl;
-  std::cout << "Avg. Receive Gates/Auths: " << durations_res[EVAL_RECEIVE_GATES_AUTHS_TIME].count() << std::endl;
-  std::cout << "Avg. CnC: " << durations_res[EVAL_CNC_TIME].count() << std::endl;
-  PRINT_TIME(presolder_end, presolder_begin, "PRE_SOLDER");
-  PRINT_TIME(setup_end, setup_begin, "SETUP_TOTAL");
-#endif
 }
 
 void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) {
@@ -858,7 +699,6 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
   IDMap eval_gates_to_blocks(eval_gates_ids, thread_params_vec[0].Q + thread_params_vec[0].A, thread_params_vec[0].out_keys_start);
   IDMap eval_auths_to_blocks(eval_auths_ids, thread_params_vec[0].Q + thread_params_vec[0].A, thread_params_vec[0].auth_start);
 
-  auto topo_soldering_begin = GET_TIME();
   for (int exec_id = 0; exec_id < top_num_execs; ++exec_id) {
     int circ_from = circuits_from[exec_id];
     int circ_to = circuits_to[exec_id];
@@ -1011,34 +851,12 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
   for (std::future<void>& r : top_soldering_execs_finished) {
     r.wait();
   }
-  auto topo_soldering_end = GET_TIME();
 
   for (std::unique_ptr<bool>& b : thread_ver_successes) {
     if (!*b) {
       throw std::runtime_error("Abort, topological soldering failed. Cheating detected");
     }
   }
-
-#ifdef PRINT_COM
-  uint64_t bytes_received = params.chan.GetCurrentBytesReceived();
-  uint64_t bytes_sent = params.chan.GetCurrentBytesSent();
-
-  params.chan.ResetReceivedBytes();
-  params.chan.ResetSentBytes();
-  for (std::unique_ptr<Params>& thread_params : thread_params_vec) {
-    bytes_received += thread_params.chan.GetCurrentBytesReceived();
-    bytes_sent += thread_params.chan.GetCurrentBytesSent();
-
-    thread_params.chan.ResetReceivedBytes();
-    thread_params.chan.ResetSentBytes();
-  }
-  std::cout << "Received " << bytes_received << " Bytes" << std::endl;
-  std::cout << "Sent " << bytes_sent << " Bytes" << std::endl;
-#endif
-
-#ifdef TINY_PRINT
-  PRINT_TIME(topo_soldering_end, topo_soldering_begin, "TOP_SOLDER");
-#endif
 }
 
 void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs, std::vector<uint8_t*>& outputs, int eval_num_execs) {
@@ -1074,7 +892,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
       GarblingHandler gh(thread_params);
       int curr_input, curr_output, ot_commit_block, commit_id, chosen_val_id;
       for (int c = circ_from; c < circ_to; ++c) {
-        auto t_0 = GET_TIME();
         circuit = circuits[c];
         eval_input = inputs[c];
         eval_outputs = outputs[c];
@@ -1102,8 +919,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
 
         exec_channels[exec_id]->asyncSendCopy(e);
 
-        auto t0 = GET_TIME();
-
         __m128i* intrin_values = new __m128i[circuit->num_wires]; //using raw pointer due to ~25% increase in overall performance. Since the online phase is so computationally efficient even the slightest performance hit is immediately seen. It does not matter in the others phases as they operation on a very different running time scale.
 
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
@@ -1123,7 +938,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
           }
         }
 
-        auto t = GET_TIME();
         exec_channels[exec_id]->recv(const_inp_keys.data(), const_inp_keys.size());
 
         //Send output decommits
@@ -1131,9 +945,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
           std::cout << "Abort: Inp Decommit fail! " << std::endl;
           throw std::runtime_error("Abort: Inp Decommit fail!");
         }
-        auto t2 = GET_TIME();
-
-        auto t3 = GET_TIME();
 
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
           curr_input = (inp_offset + i);
@@ -1151,8 +962,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
 
           intrin_values[circuit->num_const_inp_wires + i] = _mm_lddqu_si128((__m128i *) (eval_inp_keys[i]));
         }
-
-        auto t4 = GET_TIME();
 
         //Ensure that constructor sends valid keys. Implemented different than in paper as we here require that ALL input authenticators accept. This has no influence on security as if we abort here it does not leak anything about the evaluators input. Also, the sender knows if the evaluator is going to abort before sending the bad keys, so it leaks nothing.
         for (int i = 0; i < circuit->num_const_inp_wires; ++i) {
@@ -1187,7 +996,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
 #endif
 /////////////////////////////// DEBUG Input buckets////////////////////////////
 
-        auto t5 = GET_TIME();
         curr_and_gate = 0;
         for (int i = 0; i < circuit->num_gates; ++i) {
           g = circuit->gates[i];
@@ -1256,29 +1064,12 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
           }
         }
 
-        auto t6 = GET_TIME();
         for (int i = 0; i < circuit->num_out_wires; ++i) {
           curr_output = (out_offset + i);
           SetBit(i, global_out_lsb[curr_output] ^ GetLSB(intrin_values[circuit->num_wires - circuit->num_out_wires + i]), eval_outputs);
         }
 
-        auto t7 = GET_TIME();
-
         delete[] intrin_values;
-
-#ifdef TINY_PRINT
-        //Could also report average as in preprocessing
-        if ((exec_id == 0) && (c == 0)) {
-          PRINT_TIME_NANO(t0, t_0, "inp_prep");
-          PRINT_TIME_NANO(t, t0, "commit_share");
-          PRINT_TIME_NANO(t2, t, "key_wait");
-          PRINT_TIME_NANO(t3, t2, "commit");
-          PRINT_TIME_NANO(t4, t3, "eval inp");
-          PRINT_TIME_NANO(t5, t4, "const inp");
-          PRINT_TIME_NANO(t6, t5, "eval circ");
-          PRINT_TIME_NANO(t7, t6, "output decoding");
-        }
-#endif
       }
     });
   }
@@ -1286,21 +1077,4 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
   for (std::future<void>& r : online_execs_finished) {
     r.wait();
   }
-
-#ifdef PRINT_COM
-  uint64_t bytes_received = params.chan.GetCurrentBytesReceived();
-  uint64_t bytes_sent = params.chan.GetCurrentBytesSent();
-
-  params.chan.ResetReceivedBytes();
-  params.chan.ResetSentBytes();
-  for (std::unique_ptr<Params>& thread_params : thread_params_vec) {
-    bytes_received += thread_params.chan.GetCurrentBytesReceived();
-    bytes_sent += thread_params.chan.GetCurrentBytesSent();
-
-    thread_params.chan.ResetReceivedBytes();
-    thread_params.chan.ResetSentBytes();
-  }
-  std::cout << "Received " << bytes_received << " Bytes" << std::endl;
-  std::cout << "Sent " << bytes_sent << " Bytes" << std::endl;
-#endif
 }
