@@ -484,12 +484,11 @@ void TinyConstructor::Preprocess() {
     int ga_inp_to = gates_inputs_to[exec_id];
     int ga_from = gates_from[exec_id];
     int ga_to = gates_to[exec_id];
-    Params thread_params = thread_params_vec[exec_id];
 
-    pre_soldering_execs_finished[exec_id] = thread_pool.push([this, thread_params, exec_id, inp_from, inp_to, ga_inp_from, ga_inp_to, ga_from, ga_to, &eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
+    pre_soldering_execs_finished[exec_id] = thread_pool.push([this, exec_id, inp_from, inp_to, ga_inp_from, ga_inp_to, ga_from, ga_to, &eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
 
-      int num_gates = thread_params.num_pre_gates;
-      int num_inputs = thread_params.num_pre_inputs;
+      int num_gates = thread_params_vec[exec_id].num_pre_gates;
+      int num_inputs = thread_params_vec[exec_id].num_pre_inputs;
 
       //Set some often used variables
       int num_gate_solderings = num_gates * (params.num_bucket - 1) + (num_inputs / 2) * (params.num_inp_bucket - 1);
@@ -528,11 +527,11 @@ void TinyConstructor::Preprocess() {
         curr_head_gate_pos = i * params.num_bucket;
         eval_gates_to_blocks.GetExecIDAndIndex(curr_head_gate_pos, curr_head_block, curr_head_idx);
 
-        XOR_128(current_head_keys0, commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx]);
+        XOR_128(current_head_keys0, commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx]);
 
-        XOR_128(current_head_keys1, commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx]);
+        XOR_128(current_head_keys1, commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx]);
 
-        XOR_128(current_head_keys2, commit_shares[curr_head_block][0][thread_params.out_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.out_keys_start + curr_head_idx]);
+        XOR_128(current_head_keys2, commit_shares[curr_head_block][0][thread_params_vec[exec_id].out_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].out_keys_start + curr_head_idx]);
 
         //Then all of the gates in this head_gate's bucket (notice j starts at 1)
         for (int j = 1; j < params.num_bucket; ++j) {
@@ -540,37 +539,37 @@ void TinyConstructor::Preprocess() {
           eval_gates_to_blocks.GetExecIDAndIndex(curr_gate_pos, curr_gate_block, curr_gate_idx);
 
           //Left soldering
-          XOR_128(left_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params.left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.left_keys_start + curr_gate_idx]);
+          XOR_128(left_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params_vec[exec_id].left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].left_keys_start + curr_gate_idx]);
           XOR_128(left_wire_solderings + solder_gate_pos * CSEC_BYTES, current_head_keys0);
 
           //Decommit shares
-          std::copy(commit_shares[curr_gate_block][0][thread_params.left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params.left_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][solder_gate_pos]);
-          std::copy(commit_shares[curr_gate_block][1][thread_params.left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.left_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][0][thread_params_vec[exec_id].left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params_vec[exec_id].left_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][1][thread_params_vec[exec_id].left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].left_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][solder_gate_pos]);
 
-          XOR_CodeWords(presolder_decommit_shares[0][solder_gate_pos], commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx]);
-          XOR_CodeWords(presolder_decommit_shares[1][solder_gate_pos], commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[0][solder_gate_pos], commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[1][solder_gate_pos], commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx]);
 
           //Right soldering
-          XOR_128(right_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params.right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.right_keys_start + curr_gate_idx]);
+          XOR_128(right_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params_vec[exec_id].right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].right_keys_start + curr_gate_idx]);
           XOR_128(right_wire_solderings + solder_gate_pos * CSEC_BYTES, current_head_keys1);
 
           //Decommit shares
-          std::copy(commit_shares[curr_gate_block][0][thread_params.right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params.right_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][num_gate_solderings + solder_gate_pos]);
-          std::copy(commit_shares[curr_gate_block][1][thread_params.right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.right_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][num_gate_solderings + solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][0][thread_params_vec[exec_id].right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params_vec[exec_id].right_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][num_gate_solderings + solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][1][thread_params_vec[exec_id].right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].right_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][num_gate_solderings + solder_gate_pos]);
 
-          XOR_CodeWords(presolder_decommit_shares[0][num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx]);
-          XOR_CodeWords(presolder_decommit_shares[1][num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[0][num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[1][num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx]);
 
           //Out soldering
-          XOR_128(out_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params.out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.out_keys_start + curr_gate_idx]);
+          XOR_128(out_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params_vec[exec_id].out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].out_keys_start + curr_gate_idx]);
           XOR_128(out_wire_solderings + solder_gate_pos * CSEC_BYTES, current_head_keys2);
 
           //Decommit shares
-          std::copy(commit_shares[curr_gate_block][0][thread_params.out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params.out_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][2 * num_gate_solderings + solder_gate_pos]);
-          std::copy(commit_shares[curr_gate_block][1][thread_params.out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.out_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][2 * num_gate_solderings + solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][0][thread_params_vec[exec_id].out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params_vec[exec_id].out_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][2 * num_gate_solderings + solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][1][thread_params_vec[exec_id].out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].out_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][2 * num_gate_solderings + solder_gate_pos]);
 
-          XOR_CodeWords(presolder_decommit_shares[0][2 * num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][0][thread_params.out_keys_start + curr_head_idx]);
-          XOR_CodeWords(presolder_decommit_shares[1][2 * num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][1][thread_params.out_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[0][2 * num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][0][thread_params_vec[exec_id].out_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[1][2 * num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][1][thread_params_vec[exec_id].out_keys_start + curr_head_idx]);
 
           ++solder_gate_pos;
         }
@@ -581,16 +580,16 @@ void TinyConstructor::Preprocess() {
           eval_auths_to_blocks.GetExecIDAndIndex(curr_auth_pos, curr_auth_block, curr_auth_idx);
 
           //Bucket auth soldering
-          XOR_128(bucket_auth_solderings + solder_auth_pos * CSEC_BYTES, commit_shares[curr_auth_block][0][thread_params.auth_start + curr_auth_idx], commit_shares[curr_auth_block][1][thread_params.auth_start + curr_auth_idx]);
+          XOR_128(bucket_auth_solderings + solder_auth_pos * CSEC_BYTES, commit_shares[curr_auth_block][0][thread_params_vec[exec_id].auth_start + curr_auth_idx], commit_shares[curr_auth_block][1][thread_params_vec[exec_id].auth_start + curr_auth_idx]);
 
           XOR_128(bucket_auth_solderings + solder_auth_pos * CSEC_BYTES, current_head_keys2);
 
           //Decommit shares
-          std::copy(commit_shares[curr_auth_block][0][thread_params.auth_start + curr_auth_idx], commit_shares[curr_auth_block][0][thread_params.auth_start + curr_auth_idx + 1], presolder_decommit_shares[0][3 * num_gate_solderings + solder_auth_pos]);
-          std::copy(commit_shares[curr_auth_block][1][thread_params.auth_start + curr_auth_idx], commit_shares[curr_auth_block][1][thread_params.auth_start + curr_auth_idx + 1], presolder_decommit_shares[1][3 * num_gate_solderings + solder_auth_pos]);
+          std::copy(commit_shares[curr_auth_block][0][thread_params_vec[exec_id].auth_start + curr_auth_idx], commit_shares[curr_auth_block][0][thread_params_vec[exec_id].auth_start + curr_auth_idx + 1], presolder_decommit_shares[0][3 * num_gate_solderings + solder_auth_pos]);
+          std::copy(commit_shares[curr_auth_block][1][thread_params_vec[exec_id].auth_start + curr_auth_idx], commit_shares[curr_auth_block][1][thread_params_vec[exec_id].auth_start + curr_auth_idx + 1], presolder_decommit_shares[1][3 * num_gate_solderings + solder_auth_pos]);
 
-          XOR_CodeWords(presolder_decommit_shares[0][3 * num_gate_solderings + solder_auth_pos], commit_shares[curr_head_block][0][thread_params.out_keys_start + curr_head_idx]);
-          XOR_CodeWords(presolder_decommit_shares[1][3 * num_gate_solderings + solder_auth_pos], commit_shares[curr_head_block][1][thread_params.out_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[0][3 * num_gate_solderings + solder_auth_pos], commit_shares[curr_head_block][0][thread_params_vec[exec_id].out_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[1][3 * num_gate_solderings + solder_auth_pos], commit_shares[curr_head_block][1][thread_params_vec[exec_id].out_keys_start + curr_head_idx]);
 
           ++solder_auth_pos;
         }
@@ -600,11 +599,11 @@ void TinyConstructor::Preprocess() {
         curr_head_gate_pos = params.num_pre_gates * params.num_bucket + i * params.num_inp_bucket;
         eval_gates_to_blocks.GetExecIDAndIndex(curr_head_gate_pos, curr_head_block, curr_head_idx);
 
-        XOR_128(current_head_keys0, commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx]);
+        XOR_128(current_head_keys0, commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx]);
 
-        XOR_128(current_head_keys1, commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx]);
+        XOR_128(current_head_keys1, commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx]);
 
-        XOR_128(current_head_keys2, commit_shares[curr_head_block][0][thread_params.out_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.out_keys_start + curr_head_idx]);
+        XOR_128(current_head_keys2, commit_shares[curr_head_block][0][thread_params_vec[exec_id].out_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].out_keys_start + curr_head_idx]);
 
         //Then all of the gates in this head_gate's bucket (notice j starts at 1)
         for (int j = 1; j < params.num_inp_bucket; ++j) {
@@ -612,37 +611,37 @@ void TinyConstructor::Preprocess() {
           eval_gates_to_blocks.GetExecIDAndIndex(curr_gate_pos, curr_gate_block, curr_gate_idx);
 
           //Left soldering
-          XOR_128(left_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params.left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.left_keys_start + curr_gate_idx]);
+          XOR_128(left_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params_vec[exec_id].left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].left_keys_start + curr_gate_idx]);
           XOR_128(left_wire_solderings + solder_gate_pos * CSEC_BYTES, current_head_keys0);
 
           //Decommit shares
-          std::copy(commit_shares[curr_gate_block][0][thread_params.left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params.left_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][solder_gate_pos]);
-          std::copy(commit_shares[curr_gate_block][1][thread_params.left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.left_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][0][thread_params_vec[exec_id].left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params_vec[exec_id].left_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][1][thread_params_vec[exec_id].left_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].left_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][solder_gate_pos]);
 
-          XOR_CodeWords(presolder_decommit_shares[0][solder_gate_pos], commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx]);
-          XOR_CodeWords(presolder_decommit_shares[1][solder_gate_pos], commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[0][solder_gate_pos], commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[1][solder_gate_pos], commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx]);
 
           //Right soldering
-          XOR_128(right_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params.right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.right_keys_start + curr_gate_idx]);
+          XOR_128(right_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params_vec[exec_id].right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].right_keys_start + curr_gate_idx]);
           XOR_128(right_wire_solderings + solder_gate_pos * CSEC_BYTES, current_head_keys1);
 
           //Decommit shares
-          std::copy(commit_shares[curr_gate_block][0][thread_params.right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params.right_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][num_gate_solderings + solder_gate_pos]);
-          std::copy(commit_shares[curr_gate_block][1][thread_params.right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.right_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][num_gate_solderings + solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][0][thread_params_vec[exec_id].right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params_vec[exec_id].right_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][num_gate_solderings + solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][1][thread_params_vec[exec_id].right_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].right_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][num_gate_solderings + solder_gate_pos]);
 
-          XOR_CodeWords(presolder_decommit_shares[0][num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx]);
-          XOR_CodeWords(presolder_decommit_shares[1][num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[0][num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[1][num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx]);
 
           //Out soldering
-          XOR_128(out_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params.out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.out_keys_start + curr_gate_idx]);
+          XOR_128(out_wire_solderings + solder_gate_pos * CSEC_BYTES, commit_shares[curr_gate_block][0][thread_params_vec[exec_id].out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].out_keys_start + curr_gate_idx]);
           XOR_128(out_wire_solderings + solder_gate_pos * CSEC_BYTES, current_head_keys2);
 
           //Decommit shares
-          std::copy(commit_shares[curr_gate_block][0][thread_params.out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params.out_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][2 * num_gate_solderings + solder_gate_pos]);
-          std::copy(commit_shares[curr_gate_block][1][thread_params.out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params.out_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][2 * num_gate_solderings + solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][0][thread_params_vec[exec_id].out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][0][thread_params_vec[exec_id].out_keys_start + curr_gate_idx + 1], presolder_decommit_shares[0][2 * num_gate_solderings + solder_gate_pos]);
+          std::copy(commit_shares[curr_gate_block][1][thread_params_vec[exec_id].out_keys_start + curr_gate_idx], commit_shares[curr_gate_block][1][thread_params_vec[exec_id].out_keys_start + curr_gate_idx + 1], presolder_decommit_shares[1][2 * num_gate_solderings + solder_gate_pos]);
 
-          XOR_CodeWords(presolder_decommit_shares[0][2 * num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][0][thread_params.out_keys_start + curr_head_idx]);
-          XOR_CodeWords(presolder_decommit_shares[1][2 * num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][1][thread_params.out_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[0][2 * num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][0][thread_params_vec[exec_id].out_keys_start + curr_head_idx]);
+          XOR_CodeWords(presolder_decommit_shares[1][2 * num_gate_solderings + solder_gate_pos], commit_shares[curr_head_block][1][thread_params_vec[exec_id].out_keys_start + curr_head_idx]);
 
           ++solder_gate_pos;
         }
@@ -653,22 +652,22 @@ void TinyConstructor::Preprocess() {
         curr_head_inp_auth_pos = params.num_pre_gates * params.num_auth + i * params.num_inp_auth;
         eval_auths_to_blocks.GetExecIDAndIndex(curr_head_inp_auth_pos, curr_head_inp_auth_block, curr_head_inp_auth_idx);
 
-        XOR_128(current_head_keys0, commit_shares[curr_head_inp_auth_block][0][thread_params.auth_start + curr_head_inp_auth_idx], commit_shares[curr_head_inp_auth_block][1][thread_params.auth_start + curr_head_inp_auth_idx]);
+        XOR_128(current_head_keys0, commit_shares[curr_head_inp_auth_block][0][thread_params_vec[exec_id].auth_start + curr_head_inp_auth_idx], commit_shares[curr_head_inp_auth_block][1][thread_params_vec[exec_id].auth_start + curr_head_inp_auth_idx]);
 
         for (int j = 1; j < params.num_inp_auth; ++j) {
           curr_inp_auth_pos = curr_head_inp_auth_pos + j;
           eval_auths_to_blocks.GetExecIDAndIndex(curr_inp_auth_pos, curr_auth_block, curr_auth_idx);
 
           //Inp auth soldering
-          XOR_128(input_auth_solderings + solder_inp_auth_pos * CSEC_BYTES, commit_shares[curr_auth_block][0][thread_params.auth_start + curr_auth_idx], commit_shares[curr_auth_block][1][thread_params.auth_start + curr_auth_idx]);
+          XOR_128(input_auth_solderings + solder_inp_auth_pos * CSEC_BYTES, commit_shares[curr_auth_block][0][thread_params_vec[exec_id].auth_start + curr_auth_idx], commit_shares[curr_auth_block][1][thread_params_vec[exec_id].auth_start + curr_auth_idx]);
           XOR_128(input_auth_solderings + solder_inp_auth_pos * CSEC_BYTES, current_head_keys0);
 
           //Decommit shares
-          std::copy(commit_shares[curr_auth_block][0][thread_params.auth_start + curr_auth_idx], commit_shares[curr_auth_block][0][thread_params.auth_start + curr_auth_idx + 1], presolder_decommit_shares[0][3 * num_gate_solderings + num_auth_solderings + solder_inp_auth_pos]);
-          std::copy(commit_shares[curr_auth_block][1][thread_params.auth_start + curr_auth_idx], commit_shares[curr_auth_block][1][thread_params.auth_start + curr_auth_idx + 1], presolder_decommit_shares[1][3 * num_gate_solderings + num_auth_solderings + solder_inp_auth_pos]);
+          std::copy(commit_shares[curr_auth_block][0][thread_params_vec[exec_id].auth_start + curr_auth_idx], commit_shares[curr_auth_block][0][thread_params_vec[exec_id].auth_start + curr_auth_idx + 1], presolder_decommit_shares[0][3 * num_gate_solderings + num_auth_solderings + solder_inp_auth_pos]);
+          std::copy(commit_shares[curr_auth_block][1][thread_params_vec[exec_id].auth_start + curr_auth_idx], commit_shares[curr_auth_block][1][thread_params_vec[exec_id].auth_start + curr_auth_idx + 1], presolder_decommit_shares[1][3 * num_gate_solderings + num_auth_solderings + solder_inp_auth_pos]);
 
-          XOR_CodeWords(presolder_decommit_shares[0][3 * num_gate_solderings + num_auth_solderings + solder_inp_auth_pos], commit_shares[curr_head_inp_auth_block][0][thread_params.auth_start + curr_head_inp_auth_idx]);
-          XOR_CodeWords(presolder_decommit_shares[1][3 * num_gate_solderings + num_auth_solderings + solder_inp_auth_pos], commit_shares[curr_head_inp_auth_block][1][thread_params.auth_start + curr_head_inp_auth_idx]);
+          XOR_CodeWords(presolder_decommit_shares[0][3 * num_gate_solderings + num_auth_solderings + solder_inp_auth_pos], commit_shares[curr_head_inp_auth_block][0][thread_params_vec[exec_id].auth_start + curr_head_inp_auth_idx]);
+          XOR_CodeWords(presolder_decommit_shares[1][3 * num_gate_solderings + num_auth_solderings + solder_inp_auth_pos], commit_shares[curr_head_inp_auth_block][1][thread_params_vec[exec_id].auth_start + curr_head_inp_auth_idx]);
 
           ++solder_inp_auth_pos;
         }
@@ -736,9 +735,7 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
     int circ_from = circuits_from[exec_id];
     int circ_to = circuits_to[exec_id];
 
-    Params thread_params = thread_params_vec[exec_id];
-
-    top_soldering_execs_finished[exec_id] = thread_pool.push([this, thread_params, exec_id, circ_from, circ_to, num_outs_needed, &circuits, & eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
+    top_soldering_execs_finished[exec_id] = thread_pool.push([this, exec_id, circ_from, circ_to, num_outs_needed, &circuits, & eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
 
       for (int c = circ_from; c < circ_to; ++c) {
         Circuit* circuit = circuits[c];
@@ -764,15 +761,15 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
 
 
         for (int i = 0; i < circuit->num_inp_wires; ++i) {
-          curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (inp_offset + i) * thread_params.num_inp_auth;
+          curr_auth_inp_head_pos = params.num_pre_gates * thread_params_vec[exec_id].num_auth + (inp_offset + i) * thread_params_vec[exec_id].num_inp_auth;
           eval_auths_to_blocks.GetExecIDAndIndex(curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx);
 
-          std::copy(commit_shares[curr_inp_head_block][0][thread_params.auth_start + curr_inp_head_idx], commit_shares[curr_inp_head_block][0][thread_params.auth_start + curr_inp_head_idx + 1], values[i]);
-          XOR_128(values[i], commit_shares[curr_inp_head_block][1][thread_params.auth_start + curr_inp_head_idx]);
+          std::copy(commit_shares[curr_inp_head_block][0][thread_params_vec[exec_id].auth_start + curr_inp_head_idx], commit_shares[curr_inp_head_block][0][thread_params_vec[exec_id].auth_start + curr_inp_head_idx + 1], values[i]);
+          XOR_128(values[i], commit_shares[curr_inp_head_block][1][thread_params_vec[exec_id].auth_start + curr_inp_head_idx]);
 
           //Build decommit_info
-          std::copy(commit_shares[curr_inp_head_block][0][thread_params.auth_start + curr_inp_head_idx], commit_shares[curr_inp_head_block][0][thread_params.auth_start + curr_inp_head_idx + 1], decommit_shares_tmp[0][i]);
-          std::copy(commit_shares[curr_inp_head_block][1][thread_params.auth_start + curr_inp_head_idx], commit_shares[curr_inp_head_block][1][thread_params.auth_start + curr_inp_head_idx + 1], decommit_shares_tmp[1][i]);
+          std::copy(commit_shares[curr_inp_head_block][0][thread_params_vec[exec_id].auth_start + curr_inp_head_idx], commit_shares[curr_inp_head_block][0][thread_params_vec[exec_id].auth_start + curr_inp_head_idx + 1], decommit_shares_tmp[0][i]);
+          std::copy(commit_shares[curr_inp_head_block][1][thread_params_vec[exec_id].auth_start + curr_inp_head_idx], commit_shares[curr_inp_head_block][1][thread_params_vec[exec_id].auth_start + curr_inp_head_idx + 1], decommit_shares_tmp[1][i]);
         }
 
         int left_inp_start = circuit->num_and_gates;
@@ -782,25 +779,25 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
           eval_gates_to_blocks.GetExecIDAndIndex(curr_head_pos, curr_head_block, curr_head_idx);
 
           //Left
-          XOR_128(topsolder_values[left_inp_start + i], commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx]);
+          XOR_128(topsolder_values[left_inp_start + i], commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx]);
 
           XOR_128(topsolder_values[left_inp_start + i], values[i]);
 
-          std::copy(commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx + 1], topsolder_decommit_shares[0][left_inp_start + i]);
+          std::copy(commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx + 1], topsolder_decommit_shares[0][left_inp_start + i]);
           XOR_CodeWords(topsolder_decommit_shares[0][left_inp_start + i], decommit_shares_tmp[0][i]);
 
-          std::copy(commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx + 1], topsolder_decommit_shares[1][left_inp_start + i]);
+          std::copy(commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx + 1], topsolder_decommit_shares[1][left_inp_start + i]);
           XOR_CodeWords(topsolder_decommit_shares[1][left_inp_start + i], decommit_shares_tmp[1][i]);
 
           //Right
-          XOR_128(topsolder_values[right_inp_start + i], commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx]);
+          XOR_128(topsolder_values[right_inp_start + i], commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx]);
 
           XOR_128(topsolder_values[right_inp_start + i], values[circuit->num_const_inp_wires / 2 + i]);
 
-          std::copy(commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx + 1], topsolder_decommit_shares[0][right_inp_start + i]);
+          std::copy(commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx + 1], topsolder_decommit_shares[0][right_inp_start + i]);
           XOR_CodeWords(topsolder_decommit_shares[0][right_inp_start + i], decommit_shares_tmp[0][circuit->num_const_inp_wires / 2 + i]);
 
-          std::copy(commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx + 1], topsolder_decommit_shares[1][right_inp_start + i]);
+          std::copy(commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx + 1], topsolder_decommit_shares[1][right_inp_start + i]);
           XOR_CodeWords(topsolder_decommit_shares[1][right_inp_start + i], decommit_shares_tmp[1][circuit->num_const_inp_wires / 2 + i]);
         }
 
@@ -811,15 +808,15 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
           Gate g = circuit->gates[i];
           if (g.type == NOT) {
             std::copy(values[g.left_wire], values[g.left_wire + 1], values[g.out_wire]);
-            XOR_128(values[g.out_wire], commit_shares[exec_id][0][thread_params.delta_pos]);
-            XOR_128(values[g.out_wire], commit_shares[exec_id][1][thread_params.delta_pos]);
+            XOR_128(values[g.out_wire], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
+            XOR_128(values[g.out_wire], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
 
             //Build decommit_info
             std::copy(decommit_shares_tmp[0][g.left_wire], decommit_shares_tmp[0][g.left_wire + 1], decommit_shares_tmp[0][g.out_wire]);
             std::copy(decommit_shares_tmp[1][g.left_wire], decommit_shares_tmp[1][g.left_wire + 1], decommit_shares_tmp[1][g.out_wire]);
 
-            XOR_CodeWords(decommit_shares_tmp[0][g.out_wire], commit_shares[exec_id][0][thread_params.delta_pos]);
-            XOR_CodeWords(decommit_shares_tmp[1][g.out_wire], commit_shares[exec_id][1][thread_params.delta_pos]);
+            XOR_CodeWords(decommit_shares_tmp[0][g.out_wire], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
+            XOR_CodeWords(decommit_shares_tmp[1][g.out_wire], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
 
           } else if (g.type == XOR) {
             std::copy(values[g.left_wire], values[g.left_wire + 1], values[g.out_wire]);
@@ -833,26 +830,26 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
             XOR_CodeWords(decommit_shares_tmp[1][g.out_wire], decommit_shares_tmp[1][g.right_wire]);
 
           } else if (g.type == AND) {
-            curr_head_pos = (gate_offset + curr_and_gate) * thread_params.num_bucket;
+            curr_head_pos = (gate_offset + curr_and_gate) * thread_params_vec[exec_id].num_bucket;
             eval_gates_to_blocks.GetExecIDAndIndex(curr_head_pos, curr_head_block, curr_head_idx);
-            XOR_128(values[g.out_wire], commit_shares[curr_head_block][0][thread_params.out_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.out_keys_start + curr_head_idx]);
+            XOR_128(values[g.out_wire], commit_shares[curr_head_block][0][thread_params_vec[exec_id].out_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].out_keys_start + curr_head_idx]);
 
-            XOR_128(topsolder_values[left_gate_start + curr_and_gate], commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx]);
+            XOR_128(topsolder_values[left_gate_start + curr_and_gate], commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx]);
 
-            XOR_128(topsolder_values[right_gate_start + curr_and_gate], commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx]);
+            XOR_128(topsolder_values[right_gate_start + curr_and_gate], commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx]);
 
             XOR_128(topsolder_values[left_gate_start + curr_and_gate], values[g.left_wire]);
             XOR_128(topsolder_values[right_gate_start + curr_and_gate], values[g.right_wire]);
 
             //Build decommit_info
-            std::copy(commit_shares[curr_head_block][0][thread_params.out_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params.out_keys_start + curr_head_idx + 1], decommit_shares_tmp[0][g.out_wire]);
-            std::copy(commit_shares[curr_head_block][1][thread_params.out_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.out_keys_start + curr_head_idx + 1], decommit_shares_tmp[1][g.out_wire]);
+            std::copy(commit_shares[curr_head_block][0][thread_params_vec[exec_id].out_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params_vec[exec_id].out_keys_start + curr_head_idx + 1], decommit_shares_tmp[0][g.out_wire]);
+            std::copy(commit_shares[curr_head_block][1][thread_params_vec[exec_id].out_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].out_keys_start + curr_head_idx + 1], decommit_shares_tmp[1][g.out_wire]);
 
-            std::copy(commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params.left_keys_start + curr_head_idx + 1], topsolder_decommit_shares[0][left_gate_start + curr_and_gate]);
-            std::copy(commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.left_keys_start + curr_head_idx + 1], topsolder_decommit_shares[1][left_gate_start + curr_and_gate]);
+            std::copy(commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params_vec[exec_id].left_keys_start + curr_head_idx + 1], topsolder_decommit_shares[0][left_gate_start + curr_and_gate]);
+            std::copy(commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].left_keys_start + curr_head_idx + 1], topsolder_decommit_shares[1][left_gate_start + curr_and_gate]);
 
-            std::copy(commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params.right_keys_start + curr_head_idx + 1], topsolder_decommit_shares[0][right_gate_start + curr_and_gate]);
-            std::copy(commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params.right_keys_start + curr_head_idx + 1], topsolder_decommit_shares[1][right_gate_start + curr_and_gate]);
+            std::copy(commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx], commit_shares[curr_head_block][0][thread_params_vec[exec_id].right_keys_start + curr_head_idx + 1], topsolder_decommit_shares[0][right_gate_start + curr_and_gate]);
+            std::copy(commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx], commit_shares[curr_head_block][1][thread_params_vec[exec_id].right_keys_start + curr_head_idx + 1], topsolder_decommit_shares[1][right_gate_start + curr_and_gate]);
 
             XOR_CodeWords(topsolder_decommit_shares[0][left_gate_start + curr_and_gate], decommit_shares_tmp[0][g.left_wire]);
             XOR_CodeWords(topsolder_decommit_shares[1][left_gate_start + curr_and_gate], decommit_shares_tmp[1][g.left_wire]);
@@ -921,9 +918,8 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
 
     int circ_from = circuits_from[exec_id];
     int circ_to = circuits_to[exec_id];
-    Params thread_params = thread_params_vec[exec_id];
 
-    online_execs_finished[exec_id] = thread_pool.push([this, thread_params, exec_id, circ_from, circ_to, &circuits, &inputs, &eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
+    online_execs_finished[exec_id] = thread_pool.push([this, exec_id, circ_from, circ_to, &circuits, &inputs, &eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
 
       Circuit* circuit;
       uint8_t* const_input;
@@ -954,13 +950,13 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
 
         //Construct const_inp_keys first
         for (int i = 0; i < circuit->num_const_inp_wires; ++i) {
-          curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (inp_offset + i) * thread_params.num_inp_auth;
+          curr_auth_inp_head_pos = params.num_pre_gates * thread_params_vec[exec_id].num_auth + (inp_offset + i) * thread_params_vec[exec_id].num_inp_auth;
           eval_auths_to_blocks.GetExecIDAndIndex(curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx);
-          XOR_128(const_inp_keys[i], commit_shares[curr_inp_head_block][0][thread_params.auth_start + curr_inp_head_idx], commit_shares[curr_inp_head_block][1][thread_params.auth_start + curr_inp_head_idx]);
+          XOR_128(const_inp_keys[i], commit_shares[curr_inp_head_block][0][thread_params_vec[exec_id].auth_start + curr_inp_head_idx], commit_shares[curr_inp_head_block][1][thread_params_vec[exec_id].auth_start + curr_inp_head_idx]);
 
           if (GetBit(i, const_input)) {
-            XOR_128(const_inp_keys[i], commit_shares[curr_inp_head_block][0][thread_params.delta_pos]);
-            XOR_128(const_inp_keys[i], commit_shares[curr_inp_head_block][1][thread_params.delta_pos]);
+            XOR_128(const_inp_keys[i], commit_shares[curr_inp_head_block][0][thread_params_vec[exec_id].delta_pos]);
+            XOR_128(const_inp_keys[i], commit_shares[curr_inp_head_block][1][thread_params_vec[exec_id].delta_pos]);
           }
         }
 
@@ -970,8 +966,8 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
 
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
           curr_input = (inp_offset + i);
-          ot_commit_block = curr_input / thread_params.num_pre_inputs;
-          commit_id = thread_params.ot_chosen_start + (curr_input % thread_params.num_pre_inputs);
+          ot_commit_block = curr_input / thread_params_vec[exec_id].num_pre_inputs;
+          commit_id = thread_params_vec[exec_id].ot_chosen_start + (curr_input % thread_params_vec[exec_id].num_pre_inputs);
 
           //Add OT masks
           std::copy(commit_shares[ot_commit_block][0][commit_id], commit_shares[ot_commit_block][0][commit_id + 1], decommit_shares_inp[0][i]);
@@ -979,17 +975,17 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
           std::copy(commit_shares[ot_commit_block][1][commit_id], commit_shares[ot_commit_block][1][commit_id + 1], decommit_shares_inp[1][i]);
 
           //Add the input key
-          curr_auth_inp_head_pos = params.num_pre_gates * thread_params.num_auth + (circuit->num_const_inp_wires + curr_input) * thread_params.num_inp_auth;
+          curr_auth_inp_head_pos = params.num_pre_gates * thread_params_vec[exec_id].num_auth + (circuit->num_const_inp_wires + curr_input) * thread_params_vec[exec_id].num_inp_auth;
           eval_auths_to_blocks.GetExecIDAndIndex(curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx);
 
-          XOR_CodeWords(decommit_shares_inp[0][i], commit_shares[curr_inp_head_block][0][thread_params.auth_start + curr_inp_head_idx]);
+          XOR_CodeWords(decommit_shares_inp[0][i], commit_shares[curr_inp_head_block][0][thread_params_vec[exec_id].auth_start + curr_inp_head_idx]);
 
-          XOR_CodeWords(decommit_shares_inp[1][i], commit_shares[curr_inp_head_block][1][thread_params.auth_start + curr_inp_head_idx]);
+          XOR_CodeWords(decommit_shares_inp[1][i], commit_shares[curr_inp_head_block][1][thread_params_vec[exec_id].auth_start + curr_inp_head_idx]);
 
           if (GetBit(i, e.data())) {
-            XOR_CodeWords(decommit_shares_inp[0][i], commit_shares[ot_commit_block][0][thread_params.delta_pos]);
+            XOR_CodeWords(decommit_shares_inp[0][i], commit_shares[ot_commit_block][0][thread_params_vec[exec_id].delta_pos]);
 
-            XOR_CodeWords(decommit_shares_inp[1][i], commit_shares[ot_commit_block][1][thread_params.delta_pos]);
+            XOR_CodeWords(decommit_shares_inp[1][i], commit_shares[ot_commit_block][1][thread_params_vec[exec_id].delta_pos]);
           }
         }
 

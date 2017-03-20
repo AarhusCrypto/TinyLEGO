@@ -4,8 +4,6 @@
 #include "SplitCommit/src/util/global-constants.h"
 
 //Behavior
-// #define TINY_PRINT
-// #define PRINT_COM
 // #define DEBUG_SOLDERINGS_INP_BUCKETS
 
 static uint8_t tiny_constant_seeds[2][16] = {
@@ -14,11 +12,16 @@ static uint8_t tiny_constant_seeds[2][16] = {
 
 static std::string gen_matrix_path("libs/SplitCommit/matrices/bch-128x134.txt");
 
+#define CSEC 128
+#define CSEC_BYTES 16
+#define SSEC 40
+#define SSEC_BYTES 5
+
 static uint8_t global_aes_key[CSEC_BYTES] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c};
 
 //ThreadPool
-#define NUM_IO_THREADS 4
-#define TP_MUL_FACTOR 8
+#define NUM_IO_THREADS 1
+#define TP_MUL_FACTOR 2
 
 //q, alpha, beta, p_a, p_g
 #define bucket_param_table_size 44
