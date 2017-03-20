@@ -83,9 +83,8 @@ void TinyConstructor::Preprocess() {
 
   //Containers for holding pointers to objects used in each exec. For future use
   std::vector<std::future<void>> cnc_execs_finished(params.num_max_execs);
-  std::unique_ptr<uint32_t[]> tmp_gate_eval_ids_ptr(new uint32_t[params.num_eval_gates + params.num_eval_auths]);
-  uint32_t* tmp_gate_eval_ids = tmp_gate_eval_ids_ptr.get();
-  uint32_t* tmp_auth_eval_ids = tmp_gate_eval_ids + params.num_eval_gates;
+  std::vector<uint32_t> tmp_gate_eval_ids(params.num_eval_gates);
+  std::vector<uint32_t> tmp_auth_eval_ids(params.num_eval_auths);
 
   //Split the number of preprocessed gates and inputs into num_execs executions
   std::vector<int> inputs_from, inputs_to, outputs_from, outputs_to, gates_from, gates_to, gates_inputs_from, gates_inputs_to;
@@ -95,7 +94,6 @@ void TinyConstructor::Preprocess() {
   PartitionBufferFixedNum(gates_from, gates_to, params.num_max_execs, params.num_pre_gates);
 
   //Concurrency variables used for ensuring that exec_num 0 has sent and updated its global_delta commitment. This is needed as all other executions will use the same commitment to global_delta (in exec_num 0).
-  std::mutex cout_mutex;
   std::mutex delta_updated_mutex;
   std::condition_variable delta_updated_cond_val;
   bool delta_updated = false;
@@ -114,7 +112,7 @@ void TinyConstructor::Preprocess() {
     thread_params_vec.emplace_back(params, thread_num_pre_gates, thread_num_pre_inputs, thread_num_pre_outputs, exec_id);
 
     //Starts the current execution
-    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, inp_from, inp_to, tmp_auth_eval_ids, tmp_gate_eval_ids] (int id) {
+    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &delta_checks, inp_from, inp_to, &tmp_auth_eval_ids, &tmp_gate_eval_ids] (int id) {
 
       uint32_t num_ots;
       if (exec_id == 0) {
@@ -271,12 +269,12 @@ void TinyConstructor::Preprocess() {
       //===========================Run Garbling================================
 
       //Holds all memory needed for garbling
-      std::unique_ptr<uint8_t[]> raw_garbling_data(std::make_unique<uint8_t[]>(3 * thread_params_vec[exec_id].Q * CSEC_BYTES + 2 * thread_params_vec[exec_id].A * CSEC_BYTES + (3 * thread_params_vec[exec_id].Q + thread_params_vec[exec_id].A) * CSEC_BYTES));
-      std::unique_ptr<uint32_t[]> raw_id_data(std::make_unique<uint32_t[]>(thread_params_vec[exec_id].Q + thread_params_vec[exec_id].A));
+      std::vector<uint8_t> raw_garbling_data(3 * thread_params_vec[exec_id].Q * CSEC_BYTES + 2 * thread_params_vec[exec_id].A * CSEC_BYTES + (3 * thread_params_vec[exec_id].Q + thread_params_vec[exec_id].A) * CSEC_BYTES);
+      std::vector<uint32_t> raw_id_data(thread_params_vec[exec_id].Q + thread_params_vec[exec_id].A);
 
       //For convenience we assign pointers into the garbling data.
       HalfGates gates_data;
-      gates_data.T_G = raw_garbling_data.get();
+      gates_data.T_G = raw_garbling_data.data();
       gates_data.T_E = gates_data.T_G + thread_params_vec[exec_id].Q * CSEC_BYTES;
       gates_data.S_O = gates_data.T_E + thread_params_vec[exec_id].Q * CSEC_BYTES;
 
@@ -286,7 +284,7 @@ void TinyConstructor::Preprocess() {
 
       uint8_t* keys = auths_data.H_1 + thread_params_vec[exec_id].A * CSEC_BYTES;
 
-      uint32_t* gate_ids = raw_id_data.get();
+      uint32_t* gate_ids = raw_id_data.data();
       uint32_t* auth_ids = gate_ids + thread_params_vec[exec_id].Q;
 
       //Construct all 0-keys used in gates and all gate ids
@@ -317,7 +315,7 @@ void TinyConstructor::Preprocess() {
       gh.GarbleAuths(auths_data, 0, keys + 3 * thread_params_vec[exec_id].Q * CSEC_BYTES, global_delta, auth_ids, thread_params_vec[exec_id].A);
 
       //Sends gates and auths (but not keys)
-      exec_channels[exec_id]->asyncSendCopy(raw_garbling_data.get(), 3 * thread_params_vec[exec_id].Q * CSEC_BYTES + 2 * thread_params_vec[exec_id].A * CSEC_BYTES);
+      exec_channels[exec_id]->asyncSendCopy(raw_garbling_data.data(), 3 * thread_params_vec[exec_id].Q * CSEC_BYTES + 2 * thread_params_vec[exec_id].A * CSEC_BYTES);
 
       //========================Run Cut-and-Choose=============================
 
@@ -331,20 +329,20 @@ void TinyConstructor::Preprocess() {
       osuCrypto::PRNG cnc_rand;
       cnc_rand.SetSeed(load_block(cnc_seed));
 
-      std::unique_ptr<uint8_t[]> cnc_check_gates(std::make_unique<uint8_t[]>(num_bytes_gates + num_bytes_auths));
-      uint8_t* cnc_check_auths = cnc_check_gates.get() + num_bytes_gates;
-      WeightedRandomString(cnc_check_gates.get(), thread_params_vec[exec_id].p_g, num_bytes_gates, cnc_rand);
+      std::vector<uint8_t> cnc_check_gates(num_bytes_gates + num_bytes_auths);
+      uint8_t* cnc_check_auths = cnc_check_gates.data() + num_bytes_gates;
+      WeightedRandomString(cnc_check_gates.data(), thread_params_vec[exec_id].p_g, num_bytes_gates, cnc_rand);
       WeightedRandomString(cnc_check_auths, thread_params_vec[exec_id].p_a, num_bytes_auths, cnc_rand);
 
-      int num_check_gates = countSetBits(cnc_check_gates.get(), 0, thread_params_vec[exec_id].Q - 1);
+      int num_check_gates = countSetBits(cnc_check_gates.data(), 0, thread_params_vec[exec_id].Q - 1);
       int num_check_auths = countSetBits(cnc_check_auths, 0, thread_params_vec[exec_id].A - 1);
 
-      std::unique_ptr<uint8_t[]> left_cnc_input(std::make_unique<uint8_t[]>(3 * BITS_TO_BYTES(num_check_gates) + BITS_TO_BYTES(num_check_auths)));
-      uint8_t* right_cnc_input = left_cnc_input.get() + BITS_TO_BYTES(num_check_gates);
+      std::vector<uint8_t> left_cnc_input(3 * BITS_TO_BYTES(num_check_gates) + BITS_TO_BYTES(num_check_auths));
+      uint8_t* right_cnc_input = left_cnc_input.data() + BITS_TO_BYTES(num_check_gates);
       uint8_t* out_cnc_input = right_cnc_input + BITS_TO_BYTES(num_check_gates);
       uint8_t* auth_cnc_input = out_cnc_input + BITS_TO_BYTES(num_check_gates);
 
-      cnc_rand.get<uint8_t>(left_cnc_input.get(), BITS_TO_BYTES(num_check_gates));
+      cnc_rand.get<uint8_t>(left_cnc_input.data(), BITS_TO_BYTES(num_check_gates));
       cnc_rand.get<uint8_t>(right_cnc_input, BITS_TO_BYTES(num_check_gates));
       for (int i = 0; i < BITS_TO_BYTES(num_check_gates); ++i) {
         out_cnc_input[i] = left_cnc_input[i] & right_cnc_input[i];
@@ -355,7 +353,7 @@ void TinyConstructor::Preprocess() {
       //Construct the CNC keys using the above-sampled information and also stores the check indices to be used for later decommit construction. Notice we only compute left and right keys as the output key can be computed on the evaluator side given these two. However we need to include the output key in the indices as they need to be included in the decommits.
       int num_checks = 3 * num_check_gates + num_check_auths;
       int num_check_keys_sent = 2 * num_check_gates + num_check_auths;
-      std::unique_ptr<uint8_t[]> cnc_reply_keys(std::make_unique<uint8_t[]>(num_check_keys_sent * CSEC_BYTES));
+      std::vector<uint8_t> cnc_reply_keys(num_check_keys_sent * CSEC_BYTES);
 
       std::array<BYTEArrayVector, 2> cnc_decommit_shares = {
         BYTEArrayVector(num_checks, CODEWORD_BYTES),
@@ -366,11 +364,11 @@ void TinyConstructor::Preprocess() {
       int current_eval_auth_num = 0;
       for (uint32_t i = 0; i < thread_params_vec[exec_id].A; ++i) {
         if (GetBit(i, cnc_check_auths)) {
-          XOR_128(cnc_reply_keys.get() + current_auth_check_num * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id].auth_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].auth_start + i]);
+          XOR_128(cnc_reply_keys.data() + current_auth_check_num * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id].auth_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].auth_start + i]);
           std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id].auth_start + i], commit_shares[exec_id][0][thread_params_vec[exec_id].auth_start + i + 1], cnc_decommit_shares[0][current_auth_check_num]);
           std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id].auth_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].auth_start + i + 1], cnc_decommit_shares[1][current_auth_check_num]);
           if (GetBit(current_auth_check_num, auth_cnc_input)) {
-            XOR_128(cnc_reply_keys.get() + current_auth_check_num * CSEC_BYTES, global_delta);
+            XOR_128(cnc_reply_keys.data() + current_auth_check_num * CSEC_BYTES, global_delta);
             XOR_CodeWords(cnc_decommit_shares[0][current_auth_check_num], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
             XOR_CodeWords(cnc_decommit_shares[1][current_auth_check_num], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
           }
@@ -386,28 +384,28 @@ void TinyConstructor::Preprocess() {
       int current_check_gate_num = 0;
       int current_eval_gate_num = 0;
       for (uint32_t i = 0; i < thread_params_vec[exec_id].Q; ++i) {
-        if (GetBit(i, cnc_check_gates.get())) {
+        if (GetBit(i, cnc_check_gates.data())) {
 
           //Left
-          XOR_128(cnc_reply_keys.get() + (num_check_auths + current_check_gate_num) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id].left_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].left_keys_start + i]);
+          XOR_128(cnc_reply_keys.data() + (num_check_auths + current_check_gate_num) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id].left_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].left_keys_start + i]);
           std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id].left_keys_start + i], commit_shares[exec_id][0][thread_params_vec[exec_id].left_keys_start + i + 1], cnc_decommit_shares[0][num_check_auths + current_check_gate_num]);
           std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id].left_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].left_keys_start + i + 1], cnc_decommit_shares[1][num_check_auths + current_check_gate_num]);
 
           //We include the global delta if the left-input is supposed to be 1.
-          if (GetBit(current_check_gate_num, left_cnc_input.get())) {
-            XOR_128(cnc_reply_keys.get() + (num_check_auths + current_check_gate_num) * CSEC_BYTES, global_delta);
+          if (GetBit(current_check_gate_num, left_cnc_input.data())) {
+            XOR_128(cnc_reply_keys.data() + (num_check_auths + current_check_gate_num) * CSEC_BYTES, global_delta);
             XOR_CodeWords(cnc_decommit_shares[0][num_check_auths + current_check_gate_num], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
             XOR_CodeWords(cnc_decommit_shares[1][num_check_auths + current_check_gate_num], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
           }
 
           //Right
-          XOR_128(cnc_reply_keys.get() + (num_check_auths + num_check_gates + current_check_gate_num) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id].right_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].right_keys_start + i]);
+          XOR_128(cnc_reply_keys.data() + (num_check_auths + num_check_gates + current_check_gate_num) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id].right_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].right_keys_start + i]);
           std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id].right_keys_start + i], commit_shares[exec_id][0][thread_params_vec[exec_id].right_keys_start + i + 1], cnc_decommit_shares[0][num_check_auths + num_check_gates + current_check_gate_num]);
           std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id].right_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].right_keys_start + i + 1], cnc_decommit_shares[1][num_check_auths + num_check_gates + current_check_gate_num]);
 
           //We include the global delta if the right-input is supposed to be 1.
           if (GetBit(current_check_gate_num, right_cnc_input)) {
-            XOR_128(cnc_reply_keys.get() + (num_check_auths + num_check_gates + current_check_gate_num) * CSEC_BYTES, global_delta);
+            XOR_128(cnc_reply_keys.data() + (num_check_auths + num_check_gates + current_check_gate_num) * CSEC_BYTES, global_delta);
             XOR_CodeWords(cnc_decommit_shares[0][num_check_auths + num_check_gates + current_check_gate_num], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
             XOR_CodeWords(cnc_decommit_shares[1][num_check_auths + num_check_gates + current_check_gate_num], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
           }
@@ -435,7 +433,7 @@ void TinyConstructor::Preprocess() {
       }
 
       //Send all challenge keys
-      exec_channels[exec_id]->asyncSendCopy(cnc_reply_keys.get(), num_check_keys_sent * CSEC_BYTES);
+      exec_channels[exec_id]->asyncSendCopy(cnc_reply_keys.data(), num_check_keys_sent * CSEC_BYTES);
 
       //Start decommit phase using the above-created indices
       commit_senders[exec_id].BatchDecommit(cnc_decommit_shares, *exec_channels[exec_id], true);
@@ -455,19 +453,15 @@ void TinyConstructor::Preprocess() {
   uint8_t bucket_seeds[2 * CSEC_BYTES];
   bucket_rnd.get<uint8_t>(bucket_seeds, 2 * CSEC_BYTES);
 
-  std::unique_ptr<uint32_t[]> permuted_eval_ids_ptr(new uint32_t[params.num_eval_gates + params.num_eval_auths]);
-  uint32_t* permuted_eval_gates_ids = permuted_eval_ids_ptr.get();
-  uint32_t* permuted_eval_auths_ids = permuted_eval_gates_ids + params.num_eval_gates;
+  std::vector<uint32_t> permuted_eval_gates_ids(params.num_eval_gates);
+  std::vector<uint32_t> permuted_eval_auths_ids(params.num_eval_auths);
 
   //Initialize the permutation arrays
-  for (uint32_t i = 0; i < params.num_eval_gates; ++i) {
-    permuted_eval_gates_ids[i] = i;
-  }
-  for (uint32_t i = 0; i < params.num_eval_auths; ++i) {
-    permuted_eval_auths_ids[i] = i;
-  }
-  PermuteArray(permuted_eval_gates_ids, params.num_eval_gates, bucket_seeds);
-  PermuteArray(permuted_eval_auths_ids, params.num_eval_auths, bucket_seeds + CSEC_BYTES);
+  std::iota(std::begin(permuted_eval_gates_ids), std::end(permuted_eval_gates_ids), 0);
+  std::iota(std::begin(permuted_eval_auths_ids), std::end(permuted_eval_auths_ids), 0);
+
+  PermuteArray(permuted_eval_gates_ids.data(), params.num_eval_gates, bucket_seeds);
+  PermuteArray(permuted_eval_auths_ids.data(), params.num_eval_auths, bucket_seeds + CSEC_BYTES);
 
   for (uint32_t i = 0; i < params.num_eval_gates; ++i) {
     eval_gates_ids[permuted_eval_gates_ids[i]] = tmp_gate_eval_ids[i];
@@ -505,14 +499,14 @@ void TinyConstructor::Preprocess() {
       int num_pre_solderings = 3 * num_gate_solderings + num_auth_solderings + num_inp_auth_solderings;
 
       //Create raw preprocessed solderings data and point into this for convenience
-      std::unique_ptr<uint8_t[]> pre_solderings(std::make_unique<uint8_t[]>(num_pre_solderings * CSEC_BYTES + 3 * CSEC_BYTES));
+      std::vector<uint8_t> pre_solderings(num_pre_solderings * CSEC_BYTES + 3 * CSEC_BYTES);
 
       std::array<BYTEArrayVector, 2> presolder_decommit_shares {
         BYTEArrayVector(num_pre_solderings, CODEWORD_BYTES),
         BYTEArrayVector(num_pre_solderings, CODEWORD_BYTES)
       };
 
-      uint8_t* left_wire_solderings = pre_solderings.get();
+      uint8_t* left_wire_solderings = pre_solderings.data();
       uint8_t* right_wire_solderings = left_wire_solderings + CSEC_BYTES * num_gate_solderings;
       uint8_t* out_wire_solderings = right_wire_solderings + CSEC_BYTES * num_gate_solderings;
       uint8_t* bucket_auth_solderings = out_wire_solderings + CSEC_BYTES * num_gate_solderings;
@@ -681,7 +675,7 @@ void TinyConstructor::Preprocess() {
       }
 
       //We end by sending the produced solderings and starting the batch decommit procedure which uses commitments from all executions to build the decommits
-      exec_channels[exec_id]->asyncSendCopy(pre_solderings.get(), CSEC_BYTES * num_pre_solderings);
+      exec_channels[exec_id]->asyncSendCopy(pre_solderings.data(), CSEC_BYTES * num_pre_solderings);
       commit_senders[exec_id].BatchDecommit(presolder_decommit_shares, *exec_channels[exec_id], true);
 
     });

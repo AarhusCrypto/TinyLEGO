@@ -19,7 +19,8 @@ public:
   void Offline(std::vector<Circuit*>& circuits, int top_num_execs);
   void Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs, std::vector<uint8_t*>& outputs, int eval_num_execs);
 
-  std::unique_ptr<uint8_t[]> raw_eval_data;
+  std::vector<uint8_t> raw_gates_data;
+  std::vector<uint8_t> raw_auths_data;
 
   std::vector<uint32_t> eval_gates_ids;
   std::vector<uint32_t> eval_auths_ids;
