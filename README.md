@@ -27,7 +27,8 @@ The above can be installed via a package manager, i.e. apt on Ubuntu, yum on Ama
 
 After installing the above prerequisites the code can be built with the provided script _cmake-release.sh_. To verify everything is working the script _test/test-all.sh_ can afterwards be run. If all tests succeed you are good to go.
 
-##Running the main files
+Running the main files
+---
 Two main files are produced during compilation, build/release/Tinyconst and build/release/Tinyeval. An example run of the two clients on different machines could be
 * [Machine A] ./build/release/Tinyconst -n 100 -c aes -e 8,4,2 -ip [A's IP] -p [port_num]
 * [Machine B] ./build/release/Tinyeval -n 100 -c aes -e 8,4,2 -ip [A's IP] -p [port_num]
