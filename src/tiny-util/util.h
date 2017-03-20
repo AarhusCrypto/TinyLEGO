@@ -6,220 +6,18 @@
 #include "SplitCommit/src/util/util.h" //must be after above typedefs
 #include "cryptoTools/Crypto/PRNG.h" //must be after above typedefs
 
-// #define CEIL_DIVIDE(x, y)     (( ((x) + (y)-1)/(y)))
-// #define BITS_TO_BYTES(bits) (CEIL_DIVIDE((bits), CHAR_BIT))
-// #define BYTES_TO_BITS(bytes) (bytes * CHAR_BIT)
-// #define PAD_TO_MULTIPLE(x, y)     ( CEIL_DIVIDE(x, y) * (y))
 #define DOUBLE(x) _mm_slli_epi64(x,1)
 
-// #define GET_TIME() std::chrono::high_resolution_clock::now()
-// #define PRINT_TIME(end,begin,str) std::cout << str << ": " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << std::endl;
-// #define PRINT_TIME_NANO(end,begin,str) std::cout << str << ": " << std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count() << std::endl;
-
-// #define ThisThreadSleep(sec) std::this_thread::sleep_for(std::chrono::seconds(sec));
-
 static __m128i invert_array[] = {_mm_setzero_si128(), _mm_set1_epi32(0xFFFFFFFF)};
-
-// static inline void XOR_UINT8_T(uint8_t dest[], uint8_t src[], int size) {
-//   for (int i = 0; i < size; i++) {
-//     dest[i] ^= src[i];
-//   }
-// };
-
-// static inline void XOR_UINT8_T(uint8_t dest[], uint8_t src0[], uint8_t src1[], int size) {
-//   for (int i = 0; i < size; i++) {
-//     dest[i] = src0[i] ^ src1[i];
-//   }
-// };
-
-// static inline void XOR_128(uint8_t dest[], uint8_t src[]) {
-//   for (int i = 0; i < AES_BYTES; i++) {
-//     dest[i] ^= src[i];
-//   }
-// };
-
-// static inline void XOR_128(uint8_t dest[], uint8_t src0[], uint8_t src1[]) {
-//   for (int i = 0; i < AES_BYTES; i++) {
-//     dest[i] = src0[i] ^ src1[i];
-//   }
-// };
-
-// //23 bytes
-// static inline void XOR_CheckBits(uint8_t dest[], uint8_t src[]) {
-//   for (int i = 0; i < 23; i++) {
-//     dest[i] ^= src[i];
-//   }
-// };
-
-// static inline void XOR_CheckBits(uint8_t dest[], uint8_t src0[], uint8_t src1[]) {
-//   for (int i = 0; i < 23; i++) {
-//     dest[i] = src0[i] ^ src1[i];
-//   }
-// };
-
-// //39 bytes
-// static inline void XOR_CodeWords(uint8_t dest[], uint8_t src[]) {
-//   for (int i = 0; i < 39; i++) {
-//     dest[i] ^= src[i];
-//   }
-// };
-
-// static inline void XOR_CodeWords(uint8_t dest[], uint8_t src0[], uint8_t src1[]) {
-//   for (int i = 0; i < 39; i++) {
-//     dest[i] = src0[i] ^ src1[i];
-//   }
-// };
-
-// static inline uint8_t GetBitReversed(int idx, uint8_t array[]) {
-//   return !!(array[idx >> 3] & MASK_BIT[idx & 0x7]);
-// };
-
-// //MSB has highest index
-// static inline uint8_t GetBit(int idx, uint8_t array[]) {
-//   return !!(array[idx >> 3] & BIT[idx & 0x7]);
-// };
-
-// static inline void XORBitReversed(int idx, BYTE b, uint8_t array[]) {
-//   array[idx >> 3] ^= MASK_SET_BIT_C[!(b & 0x01)][idx & 0x7];
-// };
-
-// static inline void XORBit(int idx, BYTE b, uint8_t array[]) {
-//   array[idx >> 3] ^= SET_BIT_C[!(b & 0x01)][idx & 0x7];
-// };
-
-// static inline void SetBitReversed(int idx, uint8_t b, uint8_t array[]) {
-//   array[idx >> 3] = (array[idx >> 3] & CMASK_BIT[idx & 0x7]) | MASK_SET_BIT_C[!(b & 0x01)][idx & 0x7];
-// };
-
-// static inline void SetBit(int idx, uint8_t b, uint8_t array[]) {
-//   array[idx >> 3] = (array[idx >> 3] & C_BIT[idx & 0x7]) | SET_BIT_C[!(b & 0x01)][idx & 0x7];
-// };
-
-
-// static inline uint8_t GetLSB(__m128i s) {
-//   int r = _mm_movemask_pd((__m128d) s);
-//   return (r == 2 || r == 3); //Checks if lsb-1 is set or not. This is only set if lsb(array) is set.
-// };
-
-// //Wrapper
-// static inline uint8_t GetLSB(uint8_t array[]) {
-//   __m128i s = _mm_lddqu_si128((__m128i *) (array));
-//   return GetLSB(s);
-// };
-
-static inline uint128_t uint8_tTOuint128_t(uint8_t array[]) {
-  uint128_t value =
-    static_cast<uint128_t>(array[0]) |
-    static_cast<uint128_t>(array[1]) << 8 |
-    static_cast<uint128_t>(array[2]) << 16 |
-    static_cast<uint128_t>(array[3]) << 24 |
-    static_cast<uint128_t>(array[4]) << 32 |
-    static_cast<uint128_t>(array[5]) << 40 |
-    static_cast<uint128_t>(array[6]) << 48 |
-    static_cast<uint128_t>(array[7]) << 56 |
-    static_cast<uint128_t>(array[8]) << 64 |
-    static_cast<uint128_t>(array[9]) << 72 |
-    static_cast<uint128_t>(array[10]) << 80 |
-    static_cast<uint128_t>(array[11]) << 88 |
-    static_cast<uint128_t>(array[12]) << 96 |
-    static_cast<uint128_t>(array[13]) << 104 |
-    static_cast<uint128_t>(array[14]) << 112 |
-    static_cast<uint128_t>(array[15]) << 120;
-
-  return value;
-};
-
-// static inline bool compare128(__m128i a, __m128i b) {
-//   __m128i c = _mm_xor_si128(a, b);
-//   return _mm_testz_si128(c, c);
-// };
-
-
-//Multiplies, but does not reduce
-//See https://software.intel.com/sites/default/files/m/4/1/2/2/c/1230-Carry-Less-Multiplication-and-The-GCM-Mode_WP_.pdf for source
-static inline void mul128_karatsuba(__m128i a, __m128i b, __m128i *res1, __m128i *res2) {
-  __m128i tmp3, tmp4, tmp5, tmp6;
-  tmp3 = _mm_clmulepi64_si128(a, b, 0x00);
-  tmp6 = _mm_clmulepi64_si128(a, b, 0x11);
-  tmp4 = _mm_shuffle_epi32(a, 78);
-  tmp5 = _mm_shuffle_epi32(b, 78);
-  tmp4 = _mm_xor_si128(tmp4, a);
-  tmp5 = _mm_xor_si128(tmp5, b);
-
-  tmp4 = _mm_clmulepi64_si128(tmp4, tmp5, 0x00);
-  tmp4 = _mm_xor_si128(tmp4, tmp3);
-  tmp4 = _mm_xor_si128(tmp4, tmp6);
-  tmp5 = _mm_slli_si128(tmp4, 8);
-  tmp4 = _mm_srli_si128(tmp4, 8);
-  *res1 = _mm_xor_si128(tmp3, tmp5);
-  *res2 = _mm_xor_si128(tmp6, tmp4);
-};
-
-//The reduction, taking the two results of mul128_karatsuba as input
-static inline void gfred128_no_refl(__m128i tmp3, __m128i tmp6, __m128i *res) {
-  __m128i tmp7, tmp8, tmp9, tmp10, tmp11, tmp12;
-  __m128i XMMMASK = _mm_setr_epi32(0xffffffff, 0x0, 0x0, 0x0);
-  tmp7 = _mm_srli_epi32(tmp6, 31);
-  tmp8 = _mm_srli_epi32(tmp6, 30);
-  tmp9 = _mm_srli_epi32(tmp6, 25);
-  tmp7 = _mm_xor_si128(tmp7, tmp8);
-  tmp7 = _mm_xor_si128(tmp7, tmp9);
-
-  tmp8 = _mm_shuffle_epi32(tmp7, 147);
-  tmp7 = _mm_and_si128(XMMMASK, tmp8);
-  tmp8 = _mm_andnot_si128(XMMMASK, tmp8);
-  tmp3 = _mm_xor_si128(tmp3, tmp8);
-  tmp6 = _mm_xor_si128(tmp6, tmp7);
-  tmp10 = _mm_slli_epi32(tmp6, 1);
-
-  tmp3 = _mm_xor_si128(tmp3, tmp10);
-  tmp11 = _mm_slli_epi32(tmp6, 2);
-  tmp3 = _mm_xor_si128(tmp3, tmp11);
-  tmp12 = _mm_slli_epi32(tmp6, 7);
-  tmp3 = _mm_xor_si128(tmp3, tmp12);
-  *res = _mm_xor_si128(tmp3, tmp6);
-};
-
-//Convenience function. Do mul and reduction in one go
-static inline void gfmul128_no_refl(__m128i a, __m128i b, __m128i *res) {
-  __m128i tmp0, tmp1;
-
-  mul128_karatsuba(a, b, &tmp0, &tmp1);
-  gfred128_no_refl(tmp0, tmp1, res);
-};
-
-// modulo reduction to 64-bit value. The high 64 bits contain garbage, see precompReduction64. Found at https://github.com/lemire/StronglyUniversalStringHashing/blob/master/include/clmul.h#L233
-
-static inline void mul_64(__m128i a, __m128i b, __m128i* res) {
-  *res = _mm_clmulepi64_si128(a, b, 0x00);
-}
-
-static inline void gf_red_64(__m128i a, __m128i* res) {
-  const __m128i C = _mm_cvtsi64_si128((1U << 4) + (1U << 3) + (1U << 1) + (1U << 0));
-  __m128i Q2 = _mm_clmulepi64_si128( a, C, 0x01);
-  __m128i Q3 = _mm_shuffle_epi8(_mm_setr_epi8(0, 27, 54, 45, 108, 119, 90, 65, 216, 195, 238, 245, 180, 175, 130, 153),
-                                _mm_srli_si128(Q2, 8));
-  __m128i Q4 = _mm_xor_si128(Q2, a);
-  // const __m128i final = _mm_xor_si128(Q3, Q4);
-  // return final;/// WARNING: HIGH 64 BITS CONTAIN GARBAGE
-  *res = _mm_xor_si128(Q3, Q4);
-}
-
-//Convenience function. Do mul and reduction in one go
-static inline void gfmul64(__m128i a, __m128i b, __m128i* res) {
-  // __m128i tmp0, tmp1;
-  mul_64(a, b, res);
-  gf_red_64(*res, res);
-};
 
 //Functor to be used for mapping global_eval_indices to local indices
 class IDMap {
 public:
   int mod_base;
   int correction;
-  uint32_t* id_mapping;
+  std::vector<uint32_t>& id_mapping;
 
-  IDMap(uint32_t id_mapping[], int mod_base, int correction) : id_mapping(id_mapping), mod_base(mod_base), correction(correction) { }
+  IDMap(std::vector<uint32_t>& id_mapping, int mod_base, int correction) : id_mapping(id_mapping), mod_base(mod_base), correction(correction) { }
 
   void GetExecIDAndIndex(int idx, int& res_exec_id, int& res_id) {
 
@@ -227,23 +25,6 @@ public:
     res_id = (id_mapping[idx] - correction) % mod_base;
   }
 };
-
-// static inline void PrintHex(uint8_t value[], int num_bytes) {
-//   for (int i = 0; i < num_bytes; ++i) {
-//     std::cout << std::setw(2) << std::setfill('0') << (std::hex) << ((unsigned int) value[i]);
-//   }
-//   std::cout << (std::dec) << std::endl;
-// }
-
-// static inline void PrintBin(uint8_t value[], int num_bits) {
-//   for (int i = 0; i < num_bits; ++i) {
-//     if (i != 0 && i % CHAR_BIT == 0) {
-//       cout << " ";
-//     }
-//     cout << (unsigned int) GetBit(i, value);
-//   }
-//   cout << endl;
-// }
 
 //Constructs work_size / buffer_size iterations where the last iteration will contain more workload than the rest
 static inline void PartitionBufferFixedNum(std::vector<int>& from, std::vector<int>& to, int num_cpus, int work_size) {

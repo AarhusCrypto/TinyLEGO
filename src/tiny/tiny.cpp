@@ -16,8 +16,8 @@ Tiny::Tiny(uint8_t seed[], Params& params) :
 
   //Makes bucketing much easier to handle. The AES_BITS factor is needed to order to make VerLeak check behave properly
   int num_gates_rounded = PAD_TO_MULTIPLE(params.num_pre_gates, params.num_max_execs);
-  int num_inputs_rounded = PAD_TO_MULTIPLE(params.num_pre_inputs, AES_BITS * params.num_max_execs);
-  int num_outputs_rounded = PAD_TO_MULTIPLE(params.num_pre_outputs, AES_BITS * params.num_max_execs);
+  int num_inputs_rounded = PAD_TO_MULTIPLE(params.num_pre_inputs, params.num_max_execs);
+  int num_outputs_rounded = PAD_TO_MULTIPLE(params.num_pre_outputs, params.num_max_execs);
 
   params.ComputeGateAndAuthNumbers(num_gates_rounded, num_inputs_rounded, num_outputs_rounded);
 

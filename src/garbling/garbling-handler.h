@@ -70,14 +70,14 @@ static inline void aes128_load_key(uint8_t *enc_key, __m128i key_schedule[]) {
 //HalfGate Evaluation
 static inline void IntrinShiftEvaluateGates(HalfGates& gates_data, int offset, __m128i& left_key_128, __m128i& right_key_128, __m128i& out_key_128, uint32_t id, __m128i key_schedule[]) {
 
-  __m128i T_G_128 = _mm_lddqu_si128((__m128i *) (gates_data.T_G + offset * AES_BYTES));
-  __m128i T_E_128 = _mm_lddqu_si128((__m128i *) (gates_data.T_E + offset * AES_BYTES));
+  __m128i T_G_128 = _mm_lddqu_si128((__m128i *) (gates_data.T_G + offset * CSEC_BYTES));
+  __m128i T_E_128 = _mm_lddqu_si128((__m128i *) (gates_data.T_E + offset * CSEC_BYTES));
   __m128i id_128 = (__m128i) _mm_load_ss((float*) &id);
 
   //Soldering
-  __m128i S_L_128 = _mm_lddqu_si128((__m128i *) (gates_data.S_L + offset * AES_BYTES));
-  __m128i S_R_128 = _mm_lddqu_si128((__m128i *) (gates_data.S_R + offset * AES_BYTES));
-  __m128i S_O_128 = _mm_lddqu_si128((__m128i *) (gates_data.S_O + offset * AES_BYTES));
+  __m128i S_L_128 = _mm_lddqu_si128((__m128i *) (gates_data.S_L + offset * CSEC_BYTES));
+  __m128i S_R_128 = _mm_lddqu_si128((__m128i *) (gates_data.S_R + offset * CSEC_BYTES));
+  __m128i S_O_128 = _mm_lddqu_si128((__m128i *) (gates_data.S_O + offset * CSEC_BYTES));
   S_L_128 = _mm_xor_si128(left_key_128, S_L_128);
   S_R_128 = _mm_xor_si128(right_key_128, S_R_128);
 
@@ -118,11 +118,11 @@ static inline void IntrinShiftEvaluateGates(HalfGates& gates_data, int offset, _
 static inline bool IntrinVerifyAuths(Auths& auths_data, int offset, __m128i key_128, uint32_t id, __m128i key_schedule[]) {
   // __m128i hash_128, id_128, S_A_128;
 
-  __m128i hash_128 = _mm_lddqu_si128((__m128i *) (auths_data.H_0 + offset * AES_BYTES));
+  __m128i hash_128 = _mm_lddqu_si128((__m128i *) (auths_data.H_0 + offset * CSEC_BYTES));
   __m128i id_128 = (__m128i) _mm_load_ss((float*) &id);
 
   //Soldering
-  __m128i S_A_128 = _mm_lddqu_si128((__m128i *) (auths_data.S_A + offset * AES_BYTES));
+  __m128i S_A_128 = _mm_lddqu_si128((__m128i *) (auths_data.S_A + offset * CSEC_BYTES));
 
   key_128 = _mm_xor_si128(key_128, S_A_128);
 
@@ -135,7 +135,7 @@ static inline bool IntrinVerifyAuths(Auths& auths_data, int offset, __m128i key_
   if (compare128(key_128, hash_128)) {
     //Matched first authenticator
   } else {
-    hash_128 = _mm_lddqu_si128((__m128i *) (auths_data.H_1 + offset * AES_BYTES));
+    hash_128 = _mm_lddqu_si128((__m128i *) (auths_data.H_1 + offset * CSEC_BYTES));
     if (compare128(key_128, hash_128)) {
       //Matched second authenticator
     } else {

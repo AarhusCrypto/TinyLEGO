@@ -1,6 +1,8 @@
 #ifndef TINY_UTIL_GLOBAL_CONSTANTS_H_
 #define TINY_UTIL_GLOBAL_CONSTANTS_H_
 
+#include "SplitCommit/src/util/global-constants.h"
+
 //Behavior
 // #define TINY_PRINT
 // #define PRINT_COM
@@ -12,58 +14,11 @@ static uint8_t tiny_constant_seeds[2][16] = {
 
 static std::string gen_matrix_path("libs/SplitCommit/matrices/bch-128x134.txt");
 
-//AES Stuff
-#define AES_KEY_BITS      128
-#define AES_KEY_BYTES     16
-#define AES_BITS        128
-#define AES_BYTES       16
-
-static uint8_t global_aes_key[AES_KEY_BYTES] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c};
-
-// #define CSEC 128
-// #define CSEC_BYTES 16
-// #define SSEC 40
-// #define SSEC_BYTES 5
-// #define BCH_BITS 184
-// #define BCH_BYTES 23
-// #define CODEWORD_BITS 312
-// #define CODEWORD_BYTES 39
-
-#define COMMIT_HALF_BLOCK_SIZE 64
-#define COMMIT_NUM_TRANSPOSE_BLOCKS 8
-
-// gives [299,128,41] code
-#define CONFIG_BCH_CONST_PARAMS
-#define CONFIG_BCH_CONST_M 9
-#define CONFIG_BCH_CONST_T SSEC/2
-
-//Channels
-// #define GLOBAL_PARAMS_CHAN OT_ADMIN_CHANNEL-1
-
-#define MAX_TOTAL_PARAMS 10000 //Can be up to 65532, but performance seems to decrease
-
-//HACKS
-#define LLAN_MACHINE_CORES 8
-#define LLAN_MACHINE_MIN_OTX 4096
-#define AWS_MACHINE_CORES 36
-#define AWS_MACHINE_MIN_OTX 16384
+static uint8_t global_aes_key[CSEC_BYTES] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c};
 
 //ThreadPool
 #define NUM_IO_THREADS 4
 #define TP_MUL_FACTOR 8
-
-//Timings
-#define EVAL_COMMIT_TIME 0
-#define EVAL_VERLEAK_TIME 1
-#define EVAL_RECEIVE_GATES_AUTHS_TIME 2
-#define EVAL_CNC_TIME 3
-#define EVAL_NUM_TIMINGS 4
-
-#define CONST_COMMIT_TIME 0
-#define CONST_VERLEAK_TIME 1
-#define CONST_GARBLING_TIME 2
-#define CONST_CNC_TIME 3
-#define CONST_NUM_TIMINGS 4
 
 //q, alpha, beta, p_a, p_g
 #define bucket_param_table_size 44
