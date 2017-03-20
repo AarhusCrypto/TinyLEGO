@@ -3,7 +3,8 @@
 TinyEvaluator::TinyEvaluator(uint8_t seed[], Params& params) :
   Tiny(seed, params),
   raw_eval_data(std::make_unique<uint8_t[]>(5 * CSEC_BYTES * params.num_eval_gates + 3 * CSEC_BYTES * params.num_eval_auths)),
-  raw_eval_ids(std::make_unique<uint32_t[]>(params.num_eval_gates + params.num_eval_auths)),
+  eval_gates_ids(params.num_eval_gates),
+  eval_auths_ids(params.num_eval_auths),
   commit_seed_OTs(CODEWORD_BITS),
   commit_seed_choices(CODEWORD_BITS),
   commit_receivers(params.num_max_execs),
@@ -19,12 +20,10 @@ TinyEvaluator::TinyEvaluator(uint8_t seed[], Params& params) :
   eval_gates.S_O = eval_gates.T_E + CSEC_BYTES * params.num_eval_gates;
   eval_gates.S_L = eval_gates.S_O + CSEC_BYTES * params.num_eval_gates;
   eval_gates.S_R = eval_gates.S_L + CSEC_BYTES * params.num_eval_gates;
-  eval_gates_ids = raw_eval_ids.get();
 
   eval_auths.H_0 = eval_gates.S_R + CSEC_BYTES * params.num_eval_gates;
   eval_auths.H_1 = eval_auths.H_0 + CSEC_BYTES * params.num_eval_auths;
   eval_auths.S_A = eval_auths.H_1 + CSEC_BYTES * params.num_eval_auths;
-  eval_auths_ids = eval_gates_ids + params.num_eval_gates;
 }
 
 TinyEvaluator::~TinyEvaluator() {

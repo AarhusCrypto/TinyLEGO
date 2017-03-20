@@ -20,16 +20,14 @@ public:
   void Offline(std::vector<Circuit*>& circuits, int top_num_execs);
   void Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs, int eval_num_execs);
 
-  std::unique_ptr<uint32_t[]> raw_eval_ids;
+  std::vector<uint32_t> eval_gates_ids;
+  std::vector<uint32_t> eval_auths_ids;
 
   std::vector<std::array<BYTEArrayVector, 2>> commit_shares;
   std::vector<std::array<osuCrypto::block, 2>> commit_seed_OTs;
   std::vector<std::unique_ptr<osuCrypto::OtExtSender>> dot_senders;
   std::vector<SplitCommitSender> commit_senders;
 
-
-  uint32_t* eval_gates_ids;
-  uint32_t* eval_auths_ids;
 };
 
 #endif /* TINY_TINY_TINYCONST_H_ */

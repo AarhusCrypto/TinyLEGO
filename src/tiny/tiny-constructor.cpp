@@ -2,14 +2,12 @@
 
 TinyConstructor::TinyConstructor(uint8_t seed[], Params& params) :
   Tiny(seed, params),
-  raw_eval_ids(std::make_unique<uint32_t[]>(params.num_eval_gates + params.num_eval_auths)),
+  eval_gates_ids(params.num_eval_gates),
+  eval_auths_ids(params.num_eval_auths),
   commit_seed_OTs(CODEWORD_BITS),
   commit_senders(params.num_max_execs),
   commit_shares(params.num_max_execs) {
 
-  //The global eval_gate and eval_auth mappings. The below executions populate these arrays as the ids are received.
-  eval_gates_ids = raw_eval_ids.get();
-  eval_auths_ids = eval_gates_ids + params.num_eval_gates;
 }
 
 TinyConstructor::~TinyConstructor() {
@@ -82,11 +80,6 @@ void TinyConstructor::Setup() {
 }
 
 void TinyConstructor::Preprocess() {
-  std::vector<std::vector<std::chrono::duration<long double, std::milli>>> durations(CONST_NUM_TIMINGS);
-
-  for (std::vector<std::chrono::duration<long double, std::milli>>& duration : durations) {
-    duration.resize(params.num_max_execs);
-  }
 
   //Containers for holding pointers to objects used in each exec. For future use
   std::vector<std::future<void>> cnc_execs_finished(params.num_max_execs);
@@ -121,7 +114,7 @@ void TinyConstructor::Preprocess() {
     thread_params_vec.emplace_back(params, thread_num_pre_gates, thread_num_pre_inputs, thread_num_pre_outputs, exec_id);
 
     //Starts the current execution
-    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, inp_from, inp_to, &durations, tmp_auth_eval_ids, tmp_gate_eval_ids] (int id) {
+    cnc_execs_finished[exec_id] = thread_pool.push([this, exec_id, &cout_mutex, &delta_checks, inp_from, inp_to, tmp_auth_eval_ids, tmp_gate_eval_ids] (int id) {
 
       uint32_t num_ots;
       if (exec_id == 0) {
