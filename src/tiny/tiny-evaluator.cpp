@@ -707,15 +707,13 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
     thread_ver_successes.emplace_back(std::make_unique<bool>(true));
     bool* ver_success = thread_ver_successes[exec_id].get();
 
-    int num_outs_needed = 0;
-    for (int i = circ_from; i < circ_to; ++i) {
-      num_outs_needed += circuits[i]->num_out_wires;
-    }
-
     top_soldering_execs_finished[exec_id] = thread_pool.push([this, thread_params, exec_id, circ_from, circ_to, num_outs_needed, &circuits, &eval_gates_to_blocks, &eval_auths_to_blocks, ver_success] (int id) {
 
-      BYTEArrayVector commit_shares_outs(num_outs_needed, CODEWORD_BYTES);
-      int curr_out_write_pos = 0;
+      //Store in global array
+      uint32_t global_out_pos = 0;
+      for (int c = 0; c < circ_from; ++c) {
+        global_out_pos += circuits[c]->num_out_wires;
+      }
 
       for (int c = circ_from; c < circ_to; ++c) {
         Circuit* circuit = circuits[c];
@@ -810,41 +808,34 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
           }
         }
 
+        BYTEArrayVector commit_shares_outs(circuit->num_out_wires, CODEWORD_BYTES);
+
         //Leak LSB(out_key)
         for (int i = 0; i < circuit->num_out_wires; ++i) {
           std::copy(topsolder_computed_shares_tmp[circuit->num_wires - circuit->num_out_wires + i],
                     topsolder_computed_shares_tmp[circuit->num_wires - circuit->num_out_wires + i + 1],
-                    commit_shares_outs[curr_out_write_pos]);
-
-          ++curr_out_write_pos;
+                    commit_shares_outs[i]);
         }
+
+        BYTEArrayVector commit_shares_lsb_blind(SSEC, CODEWORD_BYTES);
+        if (!commit_receivers[exec_id].Commit(commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
+          std::cout << "Abort, out blind commit failed!" << std::endl;
+          throw std::runtime_error("Abort, out blind commit failed!");
+        }
+
+        BYTEArrayVector decommit_lsb(BITS_TO_BYTES(circuit->num_out_wires), 1);
+        exec_channels[exec_id]->recv(decommit_lsb.data(), decommit_lsb.size());
+
+        if (!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_outs, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id])) {
+          std::cout << "Abort, out blind lsb decommit failed!" << std::endl;
+          throw std::runtime_error("Abort, out blind lsb decommit failed!");
+        }
+
+        for (int i = 0; i < circuit->num_out_wires; ++i) {
+          global_out_lsb[global_out_pos + i] = GetBit(i, decommit_lsb.data());
+        }
+        global_out_pos += circuits[c]->num_out_wires;
       }
-
-      //Decommit
-      BYTEArrayVector commit_shares_lsb_blind(SSEC, CODEWORD_BYTES);
-      if (!commit_receivers[exec_id].Commit(commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
-        std::cout << "Abort, out blind commit failed!" << std::endl;
-        throw std::runtime_error("Abort, out blind commit failed!");
-      }
-
-      BYTEArrayVector decommit_lsb(BITS_TO_BYTES(num_outs_needed), 1);
-      exec_channels[exec_id]->recv(decommit_lsb.data(), decommit_lsb.size());
-
-      if (!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_outs, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id])) {
-        std::cout << "Abort, out blind lsb decommit failed!" << std::endl;
-        throw std::runtime_error("Abort, out blind lsb decommit failed!");
-      }
-
-      //Store in global array
-      uint32_t prev_outputs = 0;
-      for (int i = 0; i < circ_from; ++i) {
-        prev_outputs += circuits[i]->num_out_wires;
-      }
-
-      for (int i = 0; i < num_outs_needed; ++i) {
-        global_out_lsb[prev_outputs + i] = GetBit(i, decommit_lsb.data());
-      }
-
     });
   }
 

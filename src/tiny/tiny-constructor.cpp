@@ -749,21 +749,9 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
     int circ_from = circuits_from[exec_id];
     int circ_to = circuits_to[exec_id];
 
-    int num_outs_needed = 0;
-    for (int i = circ_from; i < circ_to; ++i) {
-      num_outs_needed += circuits[i]->num_out_wires;
-    }
-
     Params thread_params = thread_params_vec[exec_id];
 
     top_soldering_execs_finished[exec_id] = thread_pool.push([this, thread_params, exec_id, circ_from, circ_to, num_outs_needed, &circuits, & eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
-
-      std::array<BYTEArrayVector, 2> commit_shares_outs = {
-        BYTEArrayVector(num_outs_needed, CODEWORD_BYTES),
-        BYTEArrayVector(num_outs_needed, CODEWORD_BYTES)
-      };
-      BYTEArrayVector decommit_lsb(BITS_TO_BYTES(num_outs_needed), 1);
-      int curr_out_write_pos = 0;
 
       for (int c = circ_from; c < circ_to; ++c) {
         Circuit* circuit = circuits[c];
@@ -893,35 +881,37 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
 
         commit_senders[exec_id].BatchDecommit(topsolder_decommit_shares, *exec_channels[exec_id], true);
 
+        std::array<BYTEArrayVector, 2> commit_shares_outs = {
+          BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES),
+          BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES)
+        };
+        BYTEArrayVector decommit_lsb(BITS_TO_BYTES(circuit->num_out_wires), 1);
+
         //Leak LSB(out_key)
         for (int i = 0; i < circuit->num_out_wires; ++i) {
           std::copy(decommit_shares_tmp[0][circuit->num_wires - circuit->num_out_wires + i],
                     decommit_shares_tmp[0][circuit->num_wires - circuit->num_out_wires + i + 1],
-                    commit_shares_outs[0][curr_out_write_pos]);
+                    commit_shares_outs[0][i]);
           std::copy(decommit_shares_tmp[1][circuit->num_wires - circuit->num_out_wires + i],
                     decommit_shares_tmp[1][circuit->num_wires - circuit->num_out_wires + i + 1],
-                    commit_shares_outs[1][curr_out_write_pos]);
+                    commit_shares_outs[1][i]);
 
-          XORBit(curr_out_write_pos,
-                 GetLSB(commit_shares_outs[0][curr_out_write_pos]),
-                 GetLSB(commit_shares_outs[1][curr_out_write_pos]),
+          XORBit(i,
+                 GetLSB(commit_shares_outs[0][i]),
+                 GetLSB(commit_shares_outs[1][i]),
                  decommit_lsb.data());
-
-          ++curr_out_write_pos;
         }
+
+        //Leak OT_mask lsb bits
+        std::array<BYTEArrayVector, 2> commit_shares_lsb_blind = {
+          BYTEArrayVector(SSEC, CODEWORD_BYTES),
+          BYTEArrayVector(SSEC, CODEWORD_BYTES)
+        };
+        commit_senders[exec_id].Commit(commit_shares_lsb_blind, *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO);
+
+        SafeAsyncSend(*exec_channels[exec_id], decommit_lsb);
+        commit_senders[exec_id].BatchDecommitLSB(commit_shares_outs, commit_shares_lsb_blind, *exec_channels[exec_id]);
       }
-
-      //Leak OT_mask lsb bits
-      std::array<BYTEArrayVector, 2> commit_shares_lsb_blind = {
-        BYTEArrayVector(SSEC, CODEWORD_BYTES),
-        BYTEArrayVector(SSEC, CODEWORD_BYTES)
-      };
-
-      commit_senders[exec_id].Commit(commit_shares_lsb_blind, *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO);
-
-      SafeAsyncSend(*exec_channels[exec_id], decommit_lsb);
-      commit_senders[exec_id].BatchDecommitLSB(commit_shares_outs, commit_shares_lsb_blind, *exec_channels[exec_id]);
-
     });
   }
 
