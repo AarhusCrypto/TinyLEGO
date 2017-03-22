@@ -160,15 +160,11 @@ int main(int argc, const char* argv[]) {
 
   circuit = read_text_circuit(circuit_file_name.c_str());
 
-  std::unique_ptr<uint8_t[]> const_input(std::make_unique<uint8_t[]>(BITS_TO_BYTES(circuit.num_const_inp_wires))); //run on dummy 0 input as default
-  
+  osuCrypto::BitVector const_input(circuit.num_const_inp_wires);
   //if predetermined case read actual input
   if (!circuit_name.empty()) {
-    //Read input the "right" way
     for (int i = 0; i < circuit.num_const_inp_wires; ++i) {
-      if (GetBitReversed(i, input_buffer)) {
-        SetBit(i, 1, const_input.get());
-      }
+      const_input[i] = GetBitReversed(i, input_buffer);
     }
   }
 
@@ -178,10 +174,10 @@ int main(int argc, const char* argv[]) {
   uint64_t num_outputs = num_iters * circuit.num_out_wires;
 
   std::vector<Circuit*> circuits;
-  std::vector<uint8_t*> const_inputs;
+  std::vector<osuCrypto::BitVector> const_inputs;
   for (int i = 0; i < num_iters; ++i) {
     circuits.emplace_back(&circuit);
-    const_inputs.emplace_back(const_input.get());
+    const_inputs.emplace_back(const_input);
   }
 
   //Compute the required number of params that are to be created. We create one main param and one for each sub-thread that will be spawned later on. Need to know this at this point to setup context properly

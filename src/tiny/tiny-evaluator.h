@@ -17,7 +17,7 @@ public:
   void Setup();
   void Preprocess();
   void Offline(std::vector<Circuit*>& circuits, int top_num_execs);
-  void Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs, std::vector<uint8_t*>& outputs, int eval_num_execs);
+  void Online(std::vector<Circuit*>& circuits, std::vector<osuCrypto::BitVector>& inputs, std::vector<osuCrypto::BitVector>& outputs, int eval_num_execs);
 
   std::vector<uint8_t> raw_gates_data;
   std::vector<uint8_t> raw_auths_data;

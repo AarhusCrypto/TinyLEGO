@@ -189,8 +189,8 @@ void TinyEvaluator::Preprocess() {
         throw std::runtime_error("Abort, blind commit failed!");
       }
 
-      BYTEArrayVector decommit_lsb(BITS_TO_BYTES(num_ots), 1);
-      exec_channels[exec_id]->recv(decommit_lsb.data(), decommit_lsb.size());
+      osuCrypto::BitVector decommit_lsb(num_ots);
+      exec_channels[exec_id]->recv(decommit_lsb);
 
 
       BYTEArrayVector commit_shares_ot(num_ots, CODEWORD_BYTES);
@@ -248,26 +248,23 @@ void TinyEvaluator::Preprocess() {
 
         XOR_128(global_input_masks[prev_inputs + i], input_mask_corrections[i], input_masks[i]); // turns input_mask_corrections[i] into committed value
         global_dot_choices[prev_inputs + i] = dot_choices[i];
-        global_dot_lsb[prev_inputs + i] = GetBit(i, decommit_lsb.data());
+        global_dot_lsb[prev_inputs + i] = decommit_lsb[i];
       }
 
       //////////////////////////////////CNC////////////////////////////////////
       if (exec_id == 0) {
         //Send own values to sender
-        std::vector<uint8_t> cnc_ot_values(SSEC * CSEC_BYTES + SSEC_BYTES);
-        uint8_t* ot_delta_cnc_choices = cnc_ot_values.data() + SSEC * CSEC_BYTES;
+        BYTEArrayVector cnc_ot_values(SSEC, CSEC_BYTES);
+        osuCrypto::BitVector ot_delta_cnc_choices(SSEC);
 
         std::copy(input_masks[thread_params_vec[exec_id].num_pre_inputs], input_masks[num_ots], cnc_ot_values.data());
 
         for (int i = 0; i < SSEC; ++i) {
-          if (dot_choices[thread_params_vec[exec_id].num_pre_inputs + i]) {
-            SetBit(i, 1, ot_delta_cnc_choices);
-          } else {
-            SetBit(i, 0, ot_delta_cnc_choices);
-          }
+          ot_delta_cnc_choices[i] = dot_choices[thread_params_vec[exec_id].num_pre_inputs + i];
         }
 
-        exec_channels[exec_id]->asyncSendCopy(cnc_ot_values.data(),  SSEC * CSEC_BYTES + SSEC_BYTES);
+        exec_channels[exec_id]->send(cnc_ot_values);
+        exec_channels[exec_id]->send(ot_delta_cnc_choices);
 
         //Compute decommit shares
         BYTEArrayVector chosen_decommit_shares(SSEC, CODEWORD_BYTES);
@@ -275,7 +272,7 @@ void TinyEvaluator::Preprocess() {
         for (int i = 0; i < SSEC; ++i) {
           std::copy(commit_shares[exec_id][thread_params_vec[exec_id].ot_chosen_start + thread_params_vec[exec_id].num_pre_inputs + i], commit_shares[exec_id][thread_params_vec[exec_id].ot_chosen_start + thread_params_vec[exec_id].num_pre_inputs + i + 1], chosen_decommit_shares[i]);
 
-          if (GetBit(i, ot_delta_cnc_choices)) {
+          if (ot_delta_cnc_choices[i]) {
             XOR_CodeWords(chosen_decommit_shares[i], commit_shares[exec_id][thread_params_vec[exec_id].delta_pos]);
           }
         }
@@ -327,31 +324,29 @@ void TinyEvaluator::Preprocess() {
       //========================Run Cut-and-Choose=============================
 
       //Sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
-      int num_bytes_gates = BITS_TO_BYTES(thread_params_vec[exec_id].Q);
-      int num_bytes_auths = BITS_TO_BYTES(thread_params_vec[exec_id].A);
       osuCrypto::PRNG cnc_rand;
       cnc_rand.SetSeed(load_block(cnc_seed));
 
-      std::vector<uint8_t> cnc_check_gates(num_bytes_gates + num_bytes_auths);
-      uint8_t* cnc_check_auths = cnc_check_gates.data() + num_bytes_gates;
-      WeightedRandomString(cnc_check_gates.data(), thread_params_vec[exec_id].p_g, num_bytes_gates, cnc_rand);
-      WeightedRandomString(cnc_check_auths, thread_params_vec[exec_id].p_a, num_bytes_auths, cnc_rand);
+      osuCrypto::BitVector cnc_check_gates(thread_params_vec[exec_id].Q);
+      osuCrypto::BitVector cnc_check_auths(thread_params_vec[exec_id].A);
+      WeightedRandomString(cnc_check_gates.data(), thread_params_vec[exec_id].p_g, cnc_check_gates.sizeBytes(), cnc_rand);
+      WeightedRandomString(cnc_check_auths.data(), thread_params_vec[exec_id].p_a, cnc_check_auths.sizeBytes(), cnc_rand);
 
-      int num_check_gates = countSetBits(cnc_check_gates.data(), 0, thread_params_vec[exec_id].Q - 1);
-      int num_check_auths = countSetBits(cnc_check_auths, 0, thread_params_vec[exec_id].A - 1);
+      int num_check_gates = countSetBits(cnc_check_gates.data(), 0, thread_params_vec[exec_id].Q - 1);;
+      int num_check_auths = countSetBits(cnc_check_auths.data(), 0, thread_params_vec[exec_id].A - 1);;
 
-      std::vector<uint8_t> left_cnc_input(3 * BITS_TO_BYTES(num_check_gates) + BITS_TO_BYTES(num_check_auths));
-      uint8_t* right_cnc_input = left_cnc_input.data() + BITS_TO_BYTES(num_check_gates);
-      uint8_t* out_cnc_input = right_cnc_input + BITS_TO_BYTES(num_check_gates);
-      uint8_t* auth_cnc_input = out_cnc_input + BITS_TO_BYTES(num_check_gates);
+      osuCrypto::BitVector left_cnc_input(num_check_gates);
+      osuCrypto::BitVector right_cnc_input(num_check_gates);
+      osuCrypto::BitVector out_cnc_input(num_check_gates);
+      osuCrypto::BitVector auth_cnc_input(num_check_auths);
 
-      cnc_rand.get<uint8_t>(left_cnc_input.data(), BITS_TO_BYTES(num_check_gates));
-      cnc_rand.get<uint8_t>(right_cnc_input, BITS_TO_BYTES(num_check_gates));
-      for (int i = 0; i < BITS_TO_BYTES(num_check_gates); ++i) {
+      cnc_rand.get<uint8_t>(left_cnc_input.data(), left_cnc_input.sizeBytes());
+      cnc_rand.get<uint8_t>(right_cnc_input.data(), right_cnc_input.sizeBytes());
+      for (int i = 0; i < num_check_gates; ++i) {
         out_cnc_input[i] = left_cnc_input[i] & right_cnc_input[i];
       }
-      cnc_rand.get<uint8_t>(auth_cnc_input, BITS_TO_BYTES(num_check_auths));
-
+      cnc_rand.get<uint8_t>(auth_cnc_input.data(), auth_cnc_input.sizeBytes());
+      
       //Construct the CNC check shares to be used for later decommit verification.
       int num_checks = 3 * num_check_gates + num_check_auths;
       BYTEArrayVector cnc_computed_shares(num_checks, CODEWORD_BYTES);
@@ -363,10 +358,10 @@ void TinyEvaluator::Preprocess() {
       //Development dirty check. Can be deleted once we have computed the correct slack bounds in params.
       bool filled_eval_auths = false;
       for (uint32_t i = 0; i < thread_params_vec[exec_id].A; ++i) {
-        if (GetBit(i, cnc_check_auths)) {
+        if (cnc_check_auths[i]) {
           check_auth_ids[current_check_auth_num] = exec_id * (thread_params_vec[exec_id].Q + thread_params_vec[exec_id].A) + thread_params_vec[exec_id].auth_start + i;
           std::copy(commit_shares[exec_id][thread_params_vec[exec_id].auth_start + i], commit_shares[exec_id][thread_params_vec[exec_id].auth_start + i + 1], cnc_computed_shares[current_check_auth_num]);
-          if (GetBit(current_check_auth_num, auth_cnc_input)) {
+          if (auth_cnc_input[current_check_auth_num]) {
             XOR_CodeWords(cnc_computed_shares[current_check_auth_num], commit_shares[exec_id][thread_params_vec[exec_id].delta_pos]);
           }
           ++current_check_auth_num;
@@ -397,23 +392,23 @@ void TinyEvaluator::Preprocess() {
       int current_check_gate_num = 0;
       int current_eval_gate_num = 0;
       for (uint32_t i = 0; i < thread_params_vec[exec_id].Q; ++i) {
-        if (GetBit(i, cnc_check_gates.data())) {
+        if (cnc_check_gates[i]) {
           check_gate_ids[current_check_gate_num] = exec_id * (thread_params_vec[exec_id].Q + thread_params_vec[exec_id].A) + thread_params_vec[exec_id].out_keys_start + i;
 
           //Left
           std::copy(commit_shares[exec_id][thread_params_vec[exec_id].left_keys_start + i], commit_shares[exec_id][thread_params_vec[exec_id].left_keys_start + i + 1], cnc_computed_shares[num_check_auths + current_check_gate_num]);
-          if (GetBit(current_check_gate_num, left_cnc_input.data())) {
+          if (left_cnc_input[current_check_gate_num]) {
             XOR_CodeWords(cnc_computed_shares[num_check_auths + current_check_gate_num], commit_shares[exec_id][thread_params_vec[exec_id].delta_pos]);
           }
           //Right
           std::copy(commit_shares[exec_id][thread_params_vec[exec_id].right_keys_start + i], commit_shares[exec_id][thread_params_vec[exec_id].right_keys_start + i + 1], cnc_computed_shares[num_check_auths + num_check_gates + current_check_gate_num]);
-          if (GetBit(current_check_gate_num, right_cnc_input)) {
+          if (right_cnc_input[current_check_gate_num]) {
             XOR_CodeWords(cnc_computed_shares[num_check_auths + num_check_gates + current_check_gate_num], commit_shares[exec_id][thread_params_vec[exec_id].delta_pos]);
           }
           //Out
           std::copy(commit_shares[exec_id][thread_params_vec[exec_id].out_keys_start + i], commit_shares[exec_id][thread_params_vec[exec_id].out_keys_start + i + 1], cnc_computed_shares[num_check_auths + 2 * num_check_gates + current_check_gate_num]);
 
-          if (GetBit(current_check_gate_num, out_cnc_input)) {
+          if (out_cnc_input[current_check_gate_num]) {
             XOR_CodeWords(cnc_computed_shares[num_check_auths + 2 * num_check_gates + current_check_gate_num], commit_shares[exec_id][thread_params_vec[exec_id].delta_pos]);
           }
           ++current_check_gate_num;
@@ -809,8 +804,8 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
           throw std::runtime_error("Abort, out blind commit failed!");
         }
 
-        BYTEArrayVector decommit_lsb(BITS_TO_BYTES(circuit->num_out_wires), 1);
-        exec_channels[exec_id]->recv(decommit_lsb.data(), decommit_lsb.size());
+        osuCrypto::BitVector decommit_lsb(circuit->num_out_wires);
+        exec_channels[exec_id]->recv(decommit_lsb);
 
         if (!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_outs, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id])) {
           std::cout << "Abort, out blind lsb decommit failed!" << std::endl;
@@ -818,7 +813,7 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
         }
 
         for (int i = 0; i < circuit->num_out_wires; ++i) {
-          global_out_lsb[global_out_pos + i] = GetBit(i, decommit_lsb.data());
+          global_out_lsb[global_out_pos + i] = decommit_lsb[i];
         }
         global_out_pos += circuits[c]->num_out_wires;
       }
@@ -836,7 +831,7 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
   }
 }
 
-void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs, std::vector<uint8_t*>& outputs, int eval_num_execs) {
+void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<osuCrypto::BitVector>& inputs, std::vector<osuCrypto::BitVector>& outputs, int eval_num_execs) {
 
   std::vector<std::future<void>> online_execs_finished(eval_num_execs);
   std::vector<int> circuits_from, circuits_to;
@@ -856,8 +851,6 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
 
       Circuit* circuit;
       Gate g;
-      uint8_t* eval_input;
-      uint8_t* eval_outputs;
       __m128i intrin_outs[thread_params_vec[exec_id].num_bucket];
       __m128i intrin_auths[thread_params_vec[exec_id].num_auth];
       int bucket_score[thread_params_vec[exec_id].num_bucket];
@@ -870,15 +863,12 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
       int curr_input, curr_output, ot_commit_block, commit_id, chosen_val_id;
       for (int c = circ_from; c < circ_to; ++c) {
         circuit = circuits[c];
-        eval_input = inputs[c];
-        eval_outputs = outputs[c];
         gate_offset = gates_offset[c];
         inp_gate_offset = inp_gates_offset[c];
         inp_offset = inputs_offset[c];
         out_offset = outputs_offset[c];
 
-        BYTEArrayVector e(BITS_TO_BYTES(circuit->num_eval_inp_wires), 1);
-        BYTEArrayVector ot_choices(BITS_TO_BYTES(circuit->num_eval_inp_wires), 1);
+        osuCrypto::BitVector e(circuit->num_eval_inp_wires);
 
         BYTEArrayVector eval_computed_shares_inp(circuit->num_eval_inp_wires, CODEWORD_BYTES);
         BYTEArrayVector eval_computed_shares_out(circuit->num_out_wires, CODEWORD_BYTES);
@@ -888,7 +878,7 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
 
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
           curr_input = (inp_offset + i);
-          XORBit(i, GetBit(i, eval_input), global_dot_choices[curr_input], e.data());
+          e[i] = inputs[c][i] ^ global_dot_choices[curr_input];
         }
 
         if (circuit->num_eval_inp_wires != 0) {
@@ -909,7 +899,7 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
           eval_auths_to_blocks.GetExecIDAndIndex(curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx);
           XOR_CodeWords(eval_computed_shares_inp[i], commit_shares[curr_inp_head_block][thread_params_vec[exec_id].auth_start + curr_inp_head_idx]);
 
-          if (GetBit(i, e.data())) {
+          if (e[i]) {
             XOR_CodeWords(eval_computed_shares_inp[i], commit_shares[ot_commit_block][thread_params_vec[exec_id].delta_pos]);
           }
         }
@@ -930,11 +920,11 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
           ot_commit_block = curr_input / thread_params_vec[exec_id].num_pre_inputs;
           chosen_val_id = curr_input % thread_params_vec[exec_id].num_pre_inputs;
 
-          uint8_t lsb_zero_key = GetLSB(eval_inp_keys[i]) ^ global_dot_lsb[curr_input] ^ GetBit(i, e.data());
+          uint8_t lsb_zero_key = GetLSB(eval_inp_keys[i]) ^ global_dot_lsb[curr_input] ^ e[i];
 
           XOR_128(eval_inp_keys[i], global_input_masks[curr_input]);
 
-          if ((GetLSB(eval_inp_keys[i]) ^ lsb_zero_key) != GetBit(i, eval_input)) {
+          if ((GetLSB(eval_inp_keys[i]) ^ lsb_zero_key) != inputs[c][i]) {
             std::cout << "Abort: Wrong eval value keys sent!" << std::endl;
             throw std::runtime_error("Abort: Wrong eval value keys sent!");
           }
@@ -1045,7 +1035,7 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*
 
         for (int i = 0; i < circuit->num_out_wires; ++i) {
           curr_output = (out_offset + i);
-          SetBit(i, global_out_lsb[curr_output] ^ GetLSB(intrin_values[circuit->num_wires - circuit->num_out_wires + i]), eval_outputs);
+          outputs[c][i] = global_out_lsb[curr_output] ^ GetLSB(intrin_values[circuit->num_wires - circuit->num_out_wires + i]);
         }
 
         delete[] intrin_values;

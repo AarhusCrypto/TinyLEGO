@@ -117,7 +117,6 @@ int main(int argc, const char* argv[]) {
 
   FILE* fileptr[2];
   uint8_t* buffer[2];
-  uint8_t* expected_output;
   long filelen[2];
   opt.get("-n")->getInt(num_iters);
   opt.get("-c")->getString(circuit_name);
@@ -181,16 +180,16 @@ int main(int argc, const char* argv[]) {
 
   circuit = read_text_circuit(circuit_file_name.c_str());
 
-  std::unique_ptr<uint8_t[]> eval_input(std::make_unique<uint8_t[]>(BITS_TO_BYTES(circuit.num_eval_inp_wires))); //run on dummy 0 input
-
+  osuCrypto::BitVector eval_input(circuit.num_eval_inp_wires);
+  osuCrypto::BitVector expected_output(circuit.num_out_wires);
   //if predetermined case read actual input
   if (!circuit_name.empty()) {
     for (int i = 0; i < circuit.num_eval_inp_wires; ++i) {
-      if (GetBitReversed(i, buffer[0]  + BITS_TO_BYTES(circuit.num_const_inp_wires))) {
-        SetBit(i, 1, eval_input.get());
-      }
+      eval_input[i] = GetBitReversed(i, buffer[0]  + BITS_TO_BYTES(circuit.num_const_inp_wires));
     }
-    expected_output = buffer[1];
+    for (int i = 0; i < circuit.num_out_wires; ++i) {
+      expected_output[i] = GetBit(i, buffer[1]);
+    }
   }
 
   //Compute number of gates, inputs and outputs that are to be preprocessed
@@ -199,19 +198,19 @@ int main(int argc, const char* argv[]) {
   uint64_t num_outputs = num_iters * circuit.num_out_wires;
 
   std::vector<Circuit*> circuits;
-  std::vector<uint8_t*> eval_inputs;
-  std::vector<std::unique_ptr<uint8_t[]>> outputs;
+  std::vector<osuCrypto::BitVector> eval_inputs;
+  std::vector<osuCrypto::BitVector> outputs;
 
   for (int i = 0; i < num_iters; ++i) {
     circuits.emplace_back(&circuit);
-    eval_inputs.emplace_back(eval_input.get());
-    outputs.emplace_back(std::make_unique<uint8_t[]>(BITS_TO_BYTES(circuit.num_out_wires)));
+    eval_inputs.emplace_back(eval_input);
+    outputs.emplace_back(circuit.num_out_wires);
   }
 
   //Compute the required number of params that are to be created. We create one main param and one for each sub-thread that will be spawned later on. Need to know this at this point to setup context properly
   int num_params = std::max(pre_num_execs, offline_num_execs);
   num_params = std::max(num_params, online_num_execs);
-  
+
   //Setup the main params object
   Params params(num_gates, num_inputs, num_outputs, num_params);
 
@@ -250,47 +249,43 @@ int main(int argc, const char* argv[]) {
   }
   // tiny_eval.thread_pool.resize(params.num_cpus * TP_MUL_FACTOR); //Very high performance benefit if on a high latency network as more executions can run in parallel!
 
-  //Run Offline phase
+//Run Offline phase
   auto offline_begin = GET_TIME();
   tiny_eval.Offline(circuits, top_num_execs);
   auto offline_end = GET_TIME();
 
-  //Sync with Constructor
+//Sync with Constructor
   tiny_eval.chan->send(&snd, 1);
   tiny_eval.chan->recv(&rcv, 1);
 
   uint64_t offline_data_sent = tiny_eval.GetTotalDataSent() - setup_data_sent - preprocess_data_sent;
 
 
-  // If we are doing single evaluation then we have slightly better performance with a single thread running in the thread pool.
+// If we are doing single evaluation then we have slightly better performance with a single thread running in the thread pool.
   int eval_num_execs = std::min((int)circuits.size(), online_num_execs);
   if (eval_num_execs == 1) {
     tiny_eval.thread_pool.resize(eval_num_execs);
   }
 
-  //Prepare results vector. Needed as unique_ptr cannot be copied into Online call.
-  std::vector<uint8_t*> outputs_raw;
-  for (std::unique_ptr<uint8_t[]>& output : outputs) {
-    outputs_raw.emplace_back(output.get());
-  }
+//Prepare results vector. Needed as unique_ptr cannot be copied into Online call.
 
-  //Run Online phase
+//Run Online phase
   auto online_begin = GET_TIME();
-  tiny_eval.Online(circuits, eval_inputs, outputs_raw, eval_num_execs);
+  tiny_eval.Online(circuits, eval_inputs, outputs, eval_num_execs);
   auto online_end = GET_TIME();
 
-  //Sync with Constructor
+//Sync with Constructor
   tiny_eval.chan->send(&snd, 1);
   tiny_eval.chan->recv(&rcv, 1);
 
   uint64_t online_data_sent = tiny_eval.GetTotalDataSent() - setup_data_sent - preprocess_data_sent - offline_data_sent;
 
-  //Check for correctness if predetermined case
+//Check for correctness if predetermined case
   if (!circuit_name.empty()) {
     bool all_success = true;
     for (int i = 0; i < circuits.size(); ++i) {
       for (int j = 0; j < circuits[i]->num_out_wires; ++j) {
-        if (GetBitReversed(j, expected_output) != GetBit(j, outputs[i].get())) {
+        if (GetBitReversed(j, expected_output.data()) != outputs[i][j]) {
           all_success = false;
         }
       }
@@ -301,7 +296,7 @@ int main(int argc, const char* argv[]) {
     }
   }
 
-  // Average out the timings of each phase and print results
+// Average out the timings of each phase and print results
   uint64_t setup_time_nano = std::chrono::duration_cast<std::chrono::nanoseconds>(setup_end - setup_begin).count();
   uint64_t preprocess_time_nano = std::chrono::duration_cast<std::chrono::nanoseconds>(preprocess_end - preprocess_begin).count();
   uint64_t offline_time_nano = std::chrono::duration_cast<std::chrono::nanoseconds>(offline_end - offline_begin).count();

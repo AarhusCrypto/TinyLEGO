@@ -170,7 +170,7 @@ void TinyConstructor::Preprocess() {
 
       commit_senders[exec_id].Commit(commit_shares_lsb_blind, *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO);
 
-      BYTEArrayVector decommit_lsb(BITS_TO_BYTES(num_ots), 1);
+      osuCrypto::BitVector decommit_lsb(num_ots);
       for (int i = 0; i < num_ots; ++i) {
         XORBit(i, GetLSB(commit_shares[exec_id][0][thread_params_vec[exec_id].ot_chosen_start + i]), GetLSB(commit_shares[exec_id][1][thread_params_vec[exec_id].ot_chosen_start + i]), decommit_lsb.data());
       }
@@ -231,9 +231,10 @@ void TinyConstructor::Preprocess() {
       //////////////////////////////////CNC////////////////////////////////////
       if (exec_id == 0) {
         //Receive values from receiver and check that they are valid OTs. In the same loop we also build the decommit information.
-        std::vector<uint8_t> cnc_ot_values(SSEC * CSEC_BYTES + SSEC_BYTES);
-        exec_channels[exec_id]->recv(cnc_ot_values.data(),  SSEC * CSEC_BYTES + SSEC_BYTES);
-        uint8_t* ot_delta_cnc_choices = cnc_ot_values.data() + SSEC * CSEC_BYTES;
+        BYTEArrayVector cnc_ot_values(SSEC, CSEC_BYTES);
+        osuCrypto::BitVector ot_delta_cnc_choices(SSEC);
+        exec_channels[exec_id]->recv(cnc_ot_values);
+        exec_channels[exec_id]->recv(ot_delta_cnc_choices);
 
         uint8_t correct_ot_value[CSEC_BYTES];
         std::array<BYTEArrayVector, 2> chosen_decommit_shares = {
@@ -247,7 +248,7 @@ void TinyConstructor::Preprocess() {
 
           std::copy(input_masks[thread_params_vec[exec_id].num_pre_inputs + i], input_masks[thread_params_vec[exec_id].num_pre_inputs + i + 1], correct_ot_value);
 
-          if (GetBit(i, ot_delta_cnc_choices)) {
+          if (ot_delta_cnc_choices[i]) {
 
             XOR_CodeWords(chosen_decommit_shares[0][i], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
             XOR_CodeWords(chosen_decommit_shares[1][i], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
@@ -324,31 +325,28 @@ void TinyConstructor::Preprocess() {
       exec_channels[exec_id]->recv(cnc_seed, CSEC_BYTES);
 
       //Sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
-      int num_bytes_gates = BITS_TO_BYTES(thread_params_vec[exec_id].Q);
-      int num_bytes_auths = BITS_TO_BYTES(thread_params_vec[exec_id].A);
       osuCrypto::PRNG cnc_rand;
       cnc_rand.SetSeed(load_block(cnc_seed));
 
-      std::vector<uint8_t> cnc_check_gates(num_bytes_gates + num_bytes_auths);
-      uint8_t* cnc_check_auths = cnc_check_gates.data() + num_bytes_gates;
-      WeightedRandomString(cnc_check_gates.data(), thread_params_vec[exec_id].p_g, num_bytes_gates, cnc_rand);
-      WeightedRandomString(cnc_check_auths, thread_params_vec[exec_id].p_a, num_bytes_auths, cnc_rand);
+      osuCrypto::BitVector cnc_check_gates(thread_params_vec[exec_id].Q);
+      osuCrypto::BitVector cnc_check_auths(thread_params_vec[exec_id].A);
+      WeightedRandomString(cnc_check_gates.data(), thread_params_vec[exec_id].p_g, cnc_check_gates.sizeBytes(), cnc_rand);
+      WeightedRandomString(cnc_check_auths.data(), thread_params_vec[exec_id].p_a, cnc_check_auths.sizeBytes(), cnc_rand);
 
       int num_check_gates = countSetBits(cnc_check_gates.data(), 0, thread_params_vec[exec_id].Q - 1);
-      int num_check_auths = countSetBits(cnc_check_auths, 0, thread_params_vec[exec_id].A - 1);
+      int num_check_auths = countSetBits(cnc_check_auths.data(), 0, thread_params_vec[exec_id].A - 1);
 
-      std::vector<uint8_t> left_cnc_input(3 * BITS_TO_BYTES(num_check_gates) + BITS_TO_BYTES(num_check_auths));
-      uint8_t* right_cnc_input = left_cnc_input.data() + BITS_TO_BYTES(num_check_gates);
-      uint8_t* out_cnc_input = right_cnc_input + BITS_TO_BYTES(num_check_gates);
-      uint8_t* auth_cnc_input = out_cnc_input + BITS_TO_BYTES(num_check_gates);
+      osuCrypto::BitVector left_cnc_input(num_check_gates);
+      osuCrypto::BitVector right_cnc_input(num_check_gates);
+      osuCrypto::BitVector out_cnc_input(num_check_gates);
+      osuCrypto::BitVector auth_cnc_input(num_check_auths);
 
-      cnc_rand.get<uint8_t>(left_cnc_input.data(), BITS_TO_BYTES(num_check_gates));
-      cnc_rand.get<uint8_t>(right_cnc_input, BITS_TO_BYTES(num_check_gates));
-      for (int i = 0; i < BITS_TO_BYTES(num_check_gates); ++i) {
+      cnc_rand.get<uint8_t>(left_cnc_input.data(), left_cnc_input.sizeBytes());
+      cnc_rand.get<uint8_t>(right_cnc_input.data(), right_cnc_input.sizeBytes());
+      for (int i = 0; i < num_check_gates; ++i) {
         out_cnc_input[i] = left_cnc_input[i] & right_cnc_input[i];
       }
-
-      cnc_rand.get<uint8_t>(auth_cnc_input, BITS_TO_BYTES(num_check_auths));
+      cnc_rand.get<uint8_t>(auth_cnc_input.data(), auth_cnc_input.sizeBytes());
 
       //Construct the CNC keys using the above-sampled information and also stores the check indices to be used for later decommit construction. Notice we only compute left and right keys as the output key can be computed on the evaluator side given these two. However we need to include the output key in the indices as they need to be included in the decommits.
       int num_checks = 3 * num_check_gates + num_check_auths;
@@ -363,11 +361,11 @@ void TinyConstructor::Preprocess() {
       int current_auth_check_num = 0;
       int current_eval_auth_num = 0;
       for (uint32_t i = 0; i < thread_params_vec[exec_id].A; ++i) {
-        if (GetBit(i, cnc_check_auths)) {
+        if (cnc_check_auths[i]) {
           XOR_128(cnc_reply_keys.data() + current_auth_check_num * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id].auth_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].auth_start + i]);
           std::copy(commit_shares[exec_id][0][thread_params_vec[exec_id].auth_start + i], commit_shares[exec_id][0][thread_params_vec[exec_id].auth_start + i + 1], cnc_decommit_shares[0][current_auth_check_num]);
           std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id].auth_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].auth_start + i + 1], cnc_decommit_shares[1][current_auth_check_num]);
-          if (GetBit(current_auth_check_num, auth_cnc_input)) {
+          if (auth_cnc_input[current_auth_check_num]) {
             XOR_128(cnc_reply_keys.data() + current_auth_check_num * CSEC_BYTES, global_delta);
             XOR_CodeWords(cnc_decommit_shares[0][current_auth_check_num], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
             XOR_CodeWords(cnc_decommit_shares[1][current_auth_check_num], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
@@ -384,7 +382,7 @@ void TinyConstructor::Preprocess() {
       int current_check_gate_num = 0;
       int current_eval_gate_num = 0;
       for (uint32_t i = 0; i < thread_params_vec[exec_id].Q; ++i) {
-        if (GetBit(i, cnc_check_gates.data())) {
+        if (cnc_check_gates[i]) {
 
           //Left
           XOR_128(cnc_reply_keys.data() + (num_check_auths + current_check_gate_num) * CSEC_BYTES, commit_shares[exec_id][0][thread_params_vec[exec_id].left_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].left_keys_start + i]);
@@ -392,7 +390,7 @@ void TinyConstructor::Preprocess() {
           std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id].left_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].left_keys_start + i + 1], cnc_decommit_shares[1][num_check_auths + current_check_gate_num]);
 
           //We include the global delta if the left-input is supposed to be 1.
-          if (GetBit(current_check_gate_num, left_cnc_input.data())) {
+          if (left_cnc_input[current_check_gate_num]) {
             XOR_128(cnc_reply_keys.data() + (num_check_auths + current_check_gate_num) * CSEC_BYTES, global_delta);
             XOR_CodeWords(cnc_decommit_shares[0][num_check_auths + current_check_gate_num], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
             XOR_CodeWords(cnc_decommit_shares[1][num_check_auths + current_check_gate_num], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
@@ -404,7 +402,7 @@ void TinyConstructor::Preprocess() {
           std::copy(commit_shares[exec_id][1][thread_params_vec[exec_id].right_keys_start + i], commit_shares[exec_id][1][thread_params_vec[exec_id].right_keys_start + i + 1], cnc_decommit_shares[1][num_check_auths + num_check_gates + current_check_gate_num]);
 
           //We include the global delta if the right-input is supposed to be 1.
-          if (GetBit(current_check_gate_num, right_cnc_input)) {
+          if (right_cnc_input[current_check_gate_num]) {
             XOR_128(cnc_reply_keys.data() + (num_check_auths + num_check_gates + current_check_gate_num) * CSEC_BYTES, global_delta);
             XOR_CodeWords(cnc_decommit_shares[0][num_check_auths + num_check_gates + current_check_gate_num], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
             XOR_CodeWords(cnc_decommit_shares[1][num_check_auths + num_check_gates + current_check_gate_num], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
@@ -419,7 +417,7 @@ void TinyConstructor::Preprocess() {
                     cnc_decommit_shares[1][num_check_auths + 2 * num_check_gates + current_check_gate_num]);
 
           //We include the global delta if the right-input is supposed to be 1.
-          if (GetBit(current_check_gate_num, out_cnc_input)) {
+          if (out_cnc_input[current_check_gate_num]) {
             XOR_CodeWords(cnc_decommit_shares[0][num_check_auths + 2 * num_check_gates + current_check_gate_num], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos]);
             XOR_CodeWords(cnc_decommit_shares[1][num_check_auths + 2 * num_check_gates + current_check_gate_num], commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos]);
           }
@@ -869,7 +867,7 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
           BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES),
           BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES)
         };
-        BYTEArrayVector decommit_lsb(BITS_TO_BYTES(circuit->num_out_wires), 1);
+        osuCrypto::BitVector decommit_lsb(circuit->num_out_wires);
 
         //Leak LSB(out_key)
         for (int i = 0; i < circuit->num_out_wires; ++i) {
@@ -904,7 +902,7 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
   }
 }
 
-void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_t*>& inputs, int eval_num_execs) {
+void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<osuCrypto::BitVector>& inputs, int eval_num_execs) {
 
   std::vector<std::future<void>> online_execs_finished(eval_num_execs);
   std::vector<int> circuits_from, circuits_to;
@@ -922,14 +920,12 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
     online_execs_finished[exec_id] = thread_pool.push([this, exec_id, circ_from, circ_to, &circuits, &inputs, &eval_gates_to_blocks, &eval_auths_to_blocks] (int id) {
 
       Circuit* circuit;
-      uint8_t* const_input;
 
       int gate_offset, inp_offset, out_offset;
       int curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx, curr_output_pos, curr_output_block, curr_output_idx;
       int curr_input, curr_output, ot_commit_block, commit_id;
       for (int c = circ_from; c < circ_to; ++c) {
         circuit = circuits[c];
-        const_input = inputs[c];
         gate_offset = gates_offset[c];
         inp_offset = inputs_offset[c];
         out_offset = outputs_offset[c];
@@ -946,7 +942,7 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
           BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES)
         };
 
-        BYTEArrayVector e(BITS_TO_BYTES(circuit->num_eval_inp_wires), 1);
+        osuCrypto::BitVector e(circuit->num_eval_inp_wires);
 
         //Construct const_inp_keys first
         for (int i = 0; i < circuit->num_const_inp_wires; ++i) {
@@ -954,14 +950,14 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
           eval_auths_to_blocks.GetExecIDAndIndex(curr_auth_inp_head_pos, curr_inp_head_block, curr_inp_head_idx);
           XOR_128(const_inp_keys[i], commit_shares[curr_inp_head_block][0][thread_params_vec[exec_id].auth_start + curr_inp_head_idx], commit_shares[curr_inp_head_block][1][thread_params_vec[exec_id].auth_start + curr_inp_head_idx]);
 
-          if (GetBit(i, const_input)) {
+          if (inputs[c][i]) {
             XOR_128(const_inp_keys[i], commit_shares[curr_inp_head_block][0][thread_params_vec[exec_id].delta_pos]);
             XOR_128(const_inp_keys[i], commit_shares[curr_inp_head_block][1][thread_params_vec[exec_id].delta_pos]);
           }
         }
 
         if (circuit->num_eval_inp_wires != 0) {
-          exec_channels[exec_id]->recv(e.data(), e.size());
+          exec_channels[exec_id]->recv(e);
         }
 
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
@@ -982,7 +978,7 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<uint8_
 
           XOR_CodeWords(decommit_shares_inp[1][i], commit_shares[curr_inp_head_block][1][thread_params_vec[exec_id].auth_start + curr_inp_head_idx]);
 
-          if (GetBit(i, e.data())) {
+          if (e[i]) {
             XOR_CodeWords(decommit_shares_inp[0][i], commit_shares[ot_commit_block][0][thread_params_vec[exec_id].delta_pos]);
 
             XOR_CodeWords(decommit_shares_inp[1][i], commit_shares[ot_commit_block][1][thread_params_vec[exec_id].delta_pos]);
