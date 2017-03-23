@@ -28,6 +28,8 @@ public:
   std::vector<std::unique_ptr<osuCrypto::OtExtSender>> dot_senders;
   std::vector<SplitCommitSender> commit_senders;
 
+  std::array<BYTEArrayVector, 2> commit_shares_out_lsb_blind;
+
 };
 
 #endif /* TINY_TINY_TINYCONST_H_ */

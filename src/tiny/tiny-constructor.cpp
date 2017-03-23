@@ -7,7 +7,10 @@ TinyConstructor::TinyConstructor(uint8_t seed[], Params& params) :
   commit_seed_OTs(CODEWORD_BITS),
   commit_senders(params.num_max_execs),
   commit_shares(params.num_max_execs) {
-
+  commit_shares_out_lsb_blind = {
+    BYTEArrayVector(params.num_pre_outputs, CODEWORD_BYTES),
+    BYTEArrayVector(params.num_pre_outputs, CODEWORD_BYTES)
+  };
 }
 
 TinyConstructor::~TinyConstructor() {
@@ -267,6 +270,31 @@ void TinyConstructor::Preprocess() {
       }
       //////////////////////////////////CNC////////////////////////////////////
 
+
+      //================== Preprocess Output Blind Values =====================
+      uint32_t prev_outputs = 0;
+      for (int i = 0; i < exec_id; ++i) {
+        prev_outputs += thread_params_vec[exec_id].num_pre_outputs;
+      }
+
+      std::array<BYTEArrayVector, 2> exec_commit_shares_out_lsb_blind = {
+        BYTEArrayVector(thread_params_vec[exec_id].num_pre_outputs, CODEWORD_BYTES),
+        BYTEArrayVector(thread_params_vec[exec_id].num_pre_outputs, CODEWORD_BYTES)
+      };
+
+      commit_senders[exec_id].Commit(exec_commit_shares_out_lsb_blind, *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO);
+
+      for (int i = 0; i < thread_params_vec[exec_id].num_pre_outputs; ++i) {
+        std::copy(exec_commit_shares_out_lsb_blind[0][i],
+                  exec_commit_shares_out_lsb_blind[0][i + 1],
+                  commit_shares_out_lsb_blind[0][prev_outputs + i]);
+        std::copy(exec_commit_shares_out_lsb_blind[1][i],
+                  exec_commit_shares_out_lsb_blind[1][i + 1],
+                  commit_shares_out_lsb_blind[1][prev_outputs + i]);
+      }
+      //================== Preprocess Output Blind Values =====================
+      
+      
       //===========================Run Garbling================================
 
       //Holds all memory needed for garbling
@@ -862,37 +890,6 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
         SafeAsyncSend(*exec_channels[exec_id], topsolder_values);
 
         commit_senders[exec_id].BatchDecommit(topsolder_decommit_shares, *exec_channels[exec_id], true);
-
-        std::array<BYTEArrayVector, 2> commit_shares_outs = {
-          BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES),
-          BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES)
-        };
-        osuCrypto::BitVector decommit_lsb(circuit->num_out_wires);
-
-        //Leak LSB(out_key)
-        for (int i = 0; i < circuit->num_out_wires; ++i) {
-          std::copy(decommit_shares_tmp[0][circuit->num_wires - circuit->num_out_wires + i],
-                    decommit_shares_tmp[0][circuit->num_wires - circuit->num_out_wires + i + 1],
-                    commit_shares_outs[0][i]);
-          std::copy(decommit_shares_tmp[1][circuit->num_wires - circuit->num_out_wires + i],
-                    decommit_shares_tmp[1][circuit->num_wires - circuit->num_out_wires + i + 1],
-                    commit_shares_outs[1][i]);
-
-          XORBit(i,
-                 GetLSB(commit_shares_outs[0][i]),
-                 GetLSB(commit_shares_outs[1][i]),
-                 decommit_lsb.data());
-        }
-
-        //Leak OT_mask lsb bits
-        std::array<BYTEArrayVector, 2> commit_shares_lsb_blind = {
-          BYTEArrayVector(SSEC, CODEWORD_BYTES),
-          BYTEArrayVector(SSEC, CODEWORD_BYTES)
-        };
-        commit_senders[exec_id].Commit(commit_shares_lsb_blind, *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO);
-
-        SafeAsyncSend(*exec_channels[exec_id], decommit_lsb);
-        commit_senders[exec_id].BatchDecommitLSB(commit_shares_outs, commit_shares_lsb_blind, *exec_channels[exec_id]);
       }
     });
   }
@@ -935,11 +932,6 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<osuCry
         std::array<BYTEArrayVector, 2> decommit_shares_inp = {
           BYTEArrayVector(circuit->num_eval_inp_wires, CODEWORD_BYTES),
           BYTEArrayVector(circuit->num_eval_inp_wires, CODEWORD_BYTES)
-        };
-
-        std::array<BYTEArrayVector, 2> decommit_shares_out = {
-          BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES),
-          BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES)
         };
 
         osuCrypto::BitVector e(circuit->num_eval_inp_wires);
@@ -992,6 +984,30 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<osuCry
         if (circuit->num_eval_inp_wires != 0) {
           commit_senders[exec_id].Decommit(decommit_shares_inp, *exec_channels[exec_id]);
         }
+
+
+        std::array<BYTEArrayVector, 2> decommit_shares_out = {
+          BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES),
+          BYTEArrayVector(circuit->num_out_wires, CODEWORD_BYTES)
+        };
+
+        //Construct output key decommits
+        for (int i = 0; i < circuit->num_out_wires; ++i) {
+          curr_output = (out_offset + i);
+
+          std::copy(commit_shares_out_lsb_blind[0][curr_output], commit_shares_out_lsb_blind[0][curr_output + 1], decommit_shares_out[0][i]);
+
+          std::copy(commit_shares_out_lsb_blind[1][curr_output], commit_shares_out_lsb_blind[1][curr_output + 1], decommit_shares_out[1][i]);
+
+          curr_output_pos = (gate_offset + circuit->num_and_gates - circuit->num_out_wires + i) * thread_params_vec[exec_id].num_bucket;
+          eval_gates_to_blocks.GetExecIDAndIndex(curr_output_pos, curr_output_block, curr_output_idx);
+
+          XOR_CodeWords(decommit_shares_out[0][i], commit_shares[curr_output_block][0][thread_params_vec[exec_id].out_keys_start + curr_output_idx]);
+
+          XOR_CodeWords(decommit_shares_out[1][i], commit_shares[curr_output_block][1][thread_params_vec[exec_id].out_keys_start + curr_output_idx]);
+        }
+
+        commit_senders[exec_id].Decommit(decommit_shares_out, *exec_channels[exec_id]);
       }
     });
   }

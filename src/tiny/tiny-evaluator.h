@@ -27,8 +27,9 @@ public:
 
   osuCrypto::BitVector global_dot_choices;
   osuCrypto::BitVector global_dot_lsb;
-  osuCrypto::BitVector global_out_lsb;
   BYTEArrayVector global_input_masks;
+
+  BYTEArrayVector commit_shares_out_lsb_blind;
   
   std::vector<BYTEArrayVector> commit_shares;  
 

@@ -13,7 +13,7 @@ TinyEvaluator::TinyEvaluator(uint8_t seed[], Params& params) :
   global_dot_choices(params.num_pre_inputs),
   global_dot_lsb(params.num_pre_inputs),
   global_input_masks(params.num_pre_inputs, CSEC_BYTES),
-  global_out_lsb(params.num_pre_outputs) {
+  commit_shares_out_lsb_blind(params.num_pre_outputs, CODEWORD_BYTES) {
 
   //Pointers for convenience to the raw data used for storing the produced eval gates and eval auths. Each exec will write to this array in seperate positions and thus filling it completely. Needs to be computed like this to avoid overflow of evla_data_size
   eval_gates.T_G = raw_gates_data.data();
@@ -298,7 +298,28 @@ void TinyEvaluator::Preprocess() {
           }
         }
       }
-//////////////////////////////////////CNC////////////////////////////////////
+      //////////////////////////////////CNC////////////////////////////////////
+
+
+      //================== Preprocess Output Blind Values =====================
+      uint32_t prev_outputs = 0;
+      for (int i = 0; i < exec_id; ++i) {
+        prev_outputs += thread_params_vec[exec_id].num_pre_outputs;
+      }
+
+      BYTEArrayVector exec_commit_shares_out_lsb_blind(thread_params_vec[exec_id].num_pre_outputs, CODEWORD_BYTES);
+
+      if (!commit_receivers[exec_id].Commit(exec_commit_shares_out_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
+        std::cout << "out_lsb_blind commit failed" << std::endl;
+        throw std::runtime_error("out_lsb_blind commit failed");
+      }
+
+      for (int i = 0; i < thread_params_vec[exec_id].num_pre_outputs; ++i) {
+        std::copy(exec_commit_shares_out_lsb_blind[i],
+                  exec_commit_shares_out_lsb_blind[i + 1],
+                  commit_shares_out_lsb_blind[prev_outputs + i]);
+      }
+      //================== Preprocess Output Blind Values =====================
 
       //==========================Receive Gates===============================
       //Sample the seed used to determine all CNC challenges
@@ -788,34 +809,6 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
             XOR_128(eval_gates.S_R + (curr_head_pos + j) * CSEC_BYTES, topological_solderings[right_inp_start + i]);
           }
         }
-
-        BYTEArrayVector commit_shares_outs(circuit->num_out_wires, CODEWORD_BYTES);
-
-        //Leak LSB(out_key)
-        for (int i = 0; i < circuit->num_out_wires; ++i) {
-          std::copy(topsolder_computed_shares_tmp[circuit->num_wires - circuit->num_out_wires + i],
-                    topsolder_computed_shares_tmp[circuit->num_wires - circuit->num_out_wires + i + 1],
-                    commit_shares_outs[i]);
-        }
-
-        BYTEArrayVector commit_shares_lsb_blind(SSEC, CODEWORD_BYTES);
-        if (!commit_receivers[exec_id].Commit(commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
-          std::cout << "Abort, out blind commit failed!" << std::endl;
-          throw std::runtime_error("Abort, out blind commit failed!");
-        }
-
-        osuCrypto::BitVector decommit_lsb(circuit->num_out_wires);
-        exec_channels[exec_id]->recv(decommit_lsb);
-
-        if (!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_outs, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id])) {
-          std::cout << "Abort, out blind lsb decommit failed!" << std::endl;
-          throw std::runtime_error("Abort, out blind lsb decommit failed!");
-        }
-
-        for (int i = 0; i < circuit->num_out_wires; ++i) {
-          global_out_lsb[global_out_pos + i] = decommit_lsb[i];
-        }
-        global_out_pos += circuits[c]->num_out_wires;
       }
     });
   }
@@ -1033,9 +1026,26 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<osuCrypt
           }
         }
 
+        BYTEArrayVector decommit_shares_out(circuit->num_out_wires, CODEWORD_BYTES);
+
+        //Construct output key decommits
         for (int i = 0; i < circuit->num_out_wires; ++i) {
           curr_output = (out_offset + i);
-          outputs[c][i] = global_out_lsb[curr_output] ^ GetLSB(intrin_values[circuit->num_wires - circuit->num_out_wires + i]);
+
+          std::copy(commit_shares_out_lsb_blind[curr_output], commit_shares_out_lsb_blind[curr_output + 1], decommit_shares_out[i]);
+
+          curr_output_pos = (gate_offset + circuit->num_and_gates - circuit->num_out_wires + i) * thread_params_vec[exec_id].num_bucket;
+          eval_gates_to_blocks.GetExecIDAndIndex(curr_output_pos, curr_output_block, curr_output_idx);
+
+          XOR_CodeWords(decommit_shares_out[i], commit_shares[curr_output_block][thread_params_vec[exec_id].out_keys_start + curr_output_idx]);
+        }
+
+        BYTEArrayVector decommit_lsb(circuit->num_out_wires, CSEC_BYTES);
+        commit_receivers[exec_id].Decommit(decommit_shares_out, decommit_lsb, *exec_channels[exec_id]);
+
+        for (int i = 0; i < circuit->num_out_wires; ++i) {
+          curr_output = (out_offset + i);
+          outputs[c][i] = GetLSB(decommit_lsb[i]) ^ GetLSB(intrin_values[circuit->num_wires - circuit->num_out_wires + i]);
         }
 
         delete[] intrin_values;
