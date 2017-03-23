@@ -74,10 +74,7 @@ void TestCircuit(std::string circuit_file, std::string input_file, std::string e
     eval_input[i] = GetBitReversed(i, buffer[0] + BITS_TO_BYTES(circuit.num_const_inp_wires));
   }
 
-  osuCrypto::BitVector expected_outputs(circuit.num_out_wires);
-  for (int i = 0; i < circuit.num_out_wires; ++i) {
-    expected_outputs[i] = GetBit(i, buffer[1]);
-  }
+  osuCrypto::BitVector expected_outputs(buffer[1], circuit.num_out_wires);
 
   std::vector<Circuit*> circuits;
   std::vector<osuCrypto::BitVector> eval_inputs;
