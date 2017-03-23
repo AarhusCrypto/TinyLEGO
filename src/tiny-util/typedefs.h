@@ -28,7 +28,6 @@
 #include <chrono>
 #include <algorithm>
 #include <numeric>
-#include <gmpxx.h>
 
 #include "tiny-util/global-constants.h"
 

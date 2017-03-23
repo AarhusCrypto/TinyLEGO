@@ -33,8 +33,10 @@ add_subdirectory(libs/SplitCommit)
 
 #Include headers
 include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/libOTe)
-include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/src/)
-include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/)
+include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/src)
+include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs)
+include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/libOTe/thirdparty/linux/boost)
+include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/libOTe/thirdparty/win/boost)
 
 include_directories(${CMAKE_CURRENT_LIST_DIR}/libs)
 include_directories(${CMAKE_CURRENT_LIST_DIR}/src)
