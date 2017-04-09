@@ -15,10 +15,10 @@ TinyConstructor::TinyConstructor(uint8_t seed[], Params& params) :
 
 TinyConstructor::~TinyConstructor() {
 
-  chan->close();
+  chan.close();
 
   for (int e = 0; e < exec_channels.size(); ++e) {
-    exec_channels[e]->close();
+    exec_channels[e].close();
   }
 
   end_point.stop();
@@ -26,12 +26,12 @@ TinyConstructor::~TinyConstructor() {
 
 void TinyConstructor::Connect(std::string ip_address, uint16_t port) {
 
-  end_point.start(ios, ip_address, port, true, "ep");
+  end_point.start(ios, ip_address, port, osuCrypto::EpMode::Server, "ep");
 
-  chan = &end_point.addChannel("chan", "chan");
+  chan = end_point.addChannel("chan", "chan");
 
   for (int e = 0; e < commit_senders.size(); ++e) {
-    exec_channels.emplace_back(&end_point.addChannel("exec_channel_" + std::to_string(e), "exec_channel_" + std::to_string(e)));
+    exec_channels.emplace_back(end_point.addChannel("exec_channel_" + std::to_string(e), "exec_channel_" + std::to_string(e)));
   }
 }
 
@@ -45,7 +45,7 @@ void TinyConstructor::Setup() {
   base_ot_choices.randomize(rnd);
 
   osuCrypto::NaorPinkas baseOTs;
-  baseOTs.receive(base_ot_choices, base_ots, rnd, *chan, 1);
+  baseOTs.receive(base_ot_choices, base_ots, rnd, chan, 1);
 
   //Extended the base ots and set them for each dot_sender
   osuCrypto::KosDotExtSender temp_dot_sender;
@@ -66,7 +66,7 @@ void TinyConstructor::Setup() {
   kos_sender.setBaseOts(currBaseSendOts, kos_ot_choices);
 
   //Run kos OTX and store the resulting NUM_COMMIT_SEED_OT OTs appropriately
-  kos_sender.send(commit_seed_OTs, rnd, *chan);
+  kos_sender.send(commit_seed_OTs, rnd, chan);
 
   SplitCommitSender tmp_sender;
   tmp_sender.SetMsgBitSize(CSEC, gen_matrix_path);
@@ -129,7 +129,7 @@ void TinyConstructor::Preprocess() {
       BYTEArrayVector input_masks(num_ots, CSEC_BYTES);
       std::vector<std::array<osuCrypto::block, 2>> msgs(num_ots);
 
-      dot_senders[exec_id]->send(msgs, exec_rnds[exec_id], *exec_channels[exec_id]);
+      dot_senders[exec_id]->send(msgs, exec_rnds[exec_id], exec_channels[exec_id]);
 
       osuCrypto::block block_delta = msgs[0][0] ^ msgs[0][1];
       uint8_t global_delta[CSEC_BYTES] = {0};
@@ -145,7 +145,7 @@ void TinyConstructor::Preprocess() {
         BYTEArrayVector(num_commits, CODEWORD_BYTES)
       };
 
-      commit_senders[exec_id].Commit(commit_shares[exec_id], *exec_channels[exec_id]);
+      commit_senders[exec_id].Commit(commit_shares[exec_id], exec_channels[exec_id]);
 
       std::array<BYTEArrayVector, 2> commit_shares_ot = {
         BYTEArrayVector(num_ots, CODEWORD_BYTES),
@@ -163,7 +163,7 @@ void TinyConstructor::Preprocess() {
         XOR_128(input_mask_corrections[i], commit_shares_ot[0][i], commit_shares_ot[1][i]);
         XOR_128(input_mask_corrections[i], input_masks[i]);
       }
-      SafeAsyncSend(*exec_channels[exec_id], input_mask_corrections);
+      exec_channels[exec_id].send(input_mask_corrections.data(), input_mask_corrections.size());
 
       //Leak OT_mask lsb bits
       std::array<BYTEArrayVector, 2> commit_shares_lsb_blind = {
@@ -171,15 +171,15 @@ void TinyConstructor::Preprocess() {
         BYTEArrayVector(SSEC, CODEWORD_BYTES)
       };
 
-      commit_senders[exec_id].Commit(commit_shares_lsb_blind, *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO);
+      commit_senders[exec_id].Commit(commit_shares_lsb_blind, exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO);
 
       osuCrypto::BitVector decommit_lsb(num_ots);
       for (int i = 0; i < num_ots; ++i) {
         XORBit(i, GetLSB(commit_shares[exec_id][0][thread_params_vec[exec_id].ot_chosen_start + i]), GetLSB(commit_shares[exec_id][1][thread_params_vec[exec_id].ot_chosen_start + i]), decommit_lsb.data());
       }
 
-      SafeAsyncSend(*exec_channels[exec_id], decommit_lsb);
-      commit_senders[exec_id].BatchDecommitLSB(commit_shares_ot, commit_shares_lsb_blind, *exec_channels[exec_id]);
+      exec_channels[exec_id].send(decommit_lsb.data(), decommit_lsb.sizeBytes());
+      commit_senders[exec_id].BatchDecommitLSB(commit_shares_ot, commit_shares_lsb_blind, exec_channels[exec_id]);
 
       //Put global_delta from OTs in delta_pos of commitment scheme. For security reasons we only do this in exec_num 0, as else a malicious sender might send different delta values in each threaded execution. Therefore only exec_num 0 gets a correction and the rest simply update their delta pointer to point into exec_num 0's delta value.
       std::condition_variable& delta_updated_cond_val = std::get<1>(delta_checks);
@@ -206,7 +206,7 @@ void TinyConstructor::Preprocess() {
         XOR_128(correction_commit_delta, current_delta, global_delta);
         XOR_CheckBits(correction_commit_delta + CSEC_BYTES, c, c_delta);
 
-        exec_channels[exec_id]->asyncSendCopy(correction_commit_delta, CODEWORD_BYTES + 1);
+        exec_channels[exec_id].asyncSendCopy(correction_commit_delta, CODEWORD_BYTES + 1);
 
         XOR_128(commit_shares[exec_id][1][thread_params_vec[exec_id].delta_pos], commit_shares[exec_id][0][thread_params_vec[exec_id].delta_pos], global_delta);
 
@@ -236,8 +236,8 @@ void TinyConstructor::Preprocess() {
         //Receive values from receiver and check that they are valid OTs. In the same loop we also build the decommit information.
         BYTEArrayVector cnc_ot_values(SSEC, CSEC_BYTES);
         osuCrypto::BitVector ot_delta_cnc_choices(SSEC);
-        exec_channels[exec_id]->recv(cnc_ot_values);
-        exec_channels[exec_id]->recv(ot_delta_cnc_choices);
+        exec_channels[exec_id].recv(cnc_ot_values.data(), cnc_ot_values.size());
+        exec_channels[exec_id].recv(ot_delta_cnc_choices.data(), ot_delta_cnc_choices.sizeBytes());
 
         uint8_t correct_ot_value[CSEC_BYTES];
         std::array<BYTEArrayVector, 2> chosen_decommit_shares = {
@@ -266,7 +266,7 @@ void TinyConstructor::Preprocess() {
         }
 
         //As receiver sent correct input masks, we now decommit to the same values. Will prove that sender indeed comitted to Delta
-        commit_senders[exec_id].Decommit(chosen_decommit_shares, *exec_channels[exec_id]);
+        commit_senders[exec_id].Decommit(chosen_decommit_shares, exec_channels[exec_id]);
       }
       //////////////////////////////////CNC////////////////////////////////////
 
@@ -282,7 +282,7 @@ void TinyConstructor::Preprocess() {
         BYTEArrayVector(thread_params_vec[exec_id].num_pre_outputs, CODEWORD_BYTES)
       };
 
-      commit_senders[exec_id].Commit(exec_commit_shares_out_lsb_blind, *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO);
+      commit_senders[exec_id].Commit(exec_commit_shares_out_lsb_blind, exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO);
 
       for (int i = 0; i < thread_params_vec[exec_id].num_pre_outputs; ++i) {
         std::copy(exec_commit_shares_out_lsb_blind[0][i],
@@ -344,13 +344,13 @@ void TinyConstructor::Preprocess() {
       gh.GarbleAuths(auths_data, 0, keys + 3 * thread_params_vec[exec_id].Q * CSEC_BYTES, global_delta, auth_ids, thread_params_vec[exec_id].A);
 
       //Sends gates and auths (but not keys)
-      exec_channels[exec_id]->asyncSendCopy(raw_garbling_data.data(), 3 * thread_params_vec[exec_id].Q * CSEC_BYTES + 2 * thread_params_vec[exec_id].A * CSEC_BYTES);
+      exec_channels[exec_id].asyncSendCopy(raw_garbling_data.data(), 3 * thread_params_vec[exec_id].Q * CSEC_BYTES + 2 * thread_params_vec[exec_id].A * CSEC_BYTES);
 
       //========================Run Cut-and-Choose=============================
 
       //Receive challenge seed and sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
       uint8_t cnc_seed[CSEC_BYTES];
-      exec_channels[exec_id]->recv(cnc_seed, CSEC_BYTES);
+      exec_channels[exec_id].recv(cnc_seed, CSEC_BYTES);
 
       //Sample check gates and check auths along with the challenge inputs to these. SampleChallenges populates all these variables
       osuCrypto::PRNG cnc_rand;
@@ -459,10 +459,10 @@ void TinyConstructor::Preprocess() {
       }
 
       //Send all challenge keys
-      exec_channels[exec_id]->asyncSendCopy(cnc_reply_keys.data(), num_check_keys_sent * CSEC_BYTES);
+      exec_channels[exec_id].asyncSendCopy(cnc_reply_keys.data(), num_check_keys_sent * CSEC_BYTES);
 
       //Start decommit phase using the above-created indices
-      commit_senders[exec_id].BatchDecommit(cnc_decommit_shares, *exec_channels[exec_id], true);
+      commit_senders[exec_id].BatchDecommit(cnc_decommit_shares, exec_channels[exec_id], true);
     });
   }
 
@@ -473,7 +473,7 @@ void TinyConstructor::Preprocess() {
 
   //Receive bucketing info
   uint8_t bucket_seed[CSEC];
-  chan->recv(bucket_seed, CSEC_BYTES);
+  chan.recv(bucket_seed, CSEC_BYTES);
   osuCrypto::PRNG bucket_rnd;
   bucket_rnd.SetSeed(load_block(bucket_seed));
   uint8_t bucket_seeds[2 * CSEC_BYTES];
@@ -700,8 +700,8 @@ void TinyConstructor::Preprocess() {
       }
 
       //We end by sending the produced solderings and starting the batch decommit procedure which uses commitments from all executions to build the decommits
-      exec_channels[exec_id]->asyncSendCopy(pre_solderings.data(), CSEC_BYTES * num_pre_solderings);
-      commit_senders[exec_id].BatchDecommit(presolder_decommit_shares, *exec_channels[exec_id], true);
+      exec_channels[exec_id].asyncSendCopy(pre_solderings.data(), CSEC_BYTES * num_pre_solderings);
+      commit_senders[exec_id].BatchDecommit(presolder_decommit_shares, exec_channels[exec_id], true);
 
     });
   }
@@ -887,9 +887,9 @@ void TinyConstructor::Offline(std::vector<Circuit*>& circuits, int top_num_execs
           }
         }
 
-        SafeAsyncSend(*exec_channels[exec_id], topsolder_values);
+        exec_channels[exec_id].send(topsolder_values.data(), topsolder_values.size());
 
-        commit_senders[exec_id].BatchDecommit(topsolder_decommit_shares, *exec_channels[exec_id], true);
+        commit_senders[exec_id].BatchDecommit(topsolder_decommit_shares, exec_channels[exec_id], true);
       }
     });
   }
@@ -949,7 +949,7 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<osuCry
         }
 
         if (circuit->num_eval_inp_wires != 0) {
-          exec_channels[exec_id]->recv(e);
+          exec_channels[exec_id].recv(e);
         }
 
         for (int i = 0; i < circuit->num_eval_inp_wires; ++i) {
@@ -978,11 +978,11 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<osuCry
         }
 
         if (circuit->num_const_inp_wires != 0) {
-          SafeAsyncSend(*exec_channels[exec_id], const_inp_keys);
+          exec_channels[exec_id].send(const_inp_keys.data(), const_inp_keys.size());
         }
 
         if (circuit->num_eval_inp_wires != 0) {
-          commit_senders[exec_id].Decommit(decommit_shares_inp, *exec_channels[exec_id]);
+          commit_senders[exec_id].Decommit(decommit_shares_inp, exec_channels[exec_id]);
         }
 
 
@@ -1007,7 +1007,7 @@ void TinyConstructor::Online(std::vector<Circuit*>& circuits, std::vector<osuCry
           XOR_CodeWords(decommit_shares_out[1][i], commit_shares[curr_output_block][1][thread_params_vec[exec_id].out_keys_start + curr_output_idx]);
         }
 
-        commit_senders[exec_id].Decommit(decommit_shares_out, *exec_channels[exec_id]);
+        commit_senders[exec_id].Decommit(decommit_shares_out, exec_channels[exec_id]);
       }
     });
   }

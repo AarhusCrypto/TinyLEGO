@@ -6,8 +6,8 @@
 #include "circuit/circuit.h"
 
 //For libOTe extension
-#include "cryptoTools/Network/BtChannel.h"
-#include "cryptoTools/Network/BtEndpoint.h"
+#include "cryptoTools/Network/Channel.h"
+#include "cryptoTools/Network/Endpoint.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #include "cryptoTools/Common/BitVector.h"
 #include "libOTe/Base/naor-pinkas.h"
@@ -38,10 +38,10 @@ public:
   osuCrypto::PRNG rnd;
 
   std::vector<osuCrypto::PRNG> exec_rnds;
-  osuCrypto::BtIOService ios;
-  osuCrypto::BtEndpoint end_point;
-  osuCrypto::Channel* chan;
-  std::vector<osuCrypto::Channel*> exec_channels;
+  osuCrypto::IOService ios;
+  osuCrypto::Endpoint end_point;
+  osuCrypto::Channel chan;
+  std::vector<osuCrypto::Channel> exec_channels;
 
   std::vector<Params> thread_params_vec;
 };

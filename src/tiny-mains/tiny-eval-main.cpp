@@ -1,4 +1,4 @@
-#include "mains/mains.h"
+#include "tiny-mains/mains.h"
 #include "tiny/tiny-evaluator.h"
 
 int main(int argc, const char* argv[]) {
@@ -237,8 +237,8 @@ int main(int argc, const char* argv[]) {
   auto preprocess_end = GET_TIME();
 
   //Sync with Constructor
-  tiny_eval.chan->send(&snd, 1);
-  tiny_eval.chan->recv(&rcv, 1);
+  tiny_eval.chan.send(&snd, 1);
+  tiny_eval.chan.recv(&rcv, 1);
 
   uint64_t preprocess_data_sent = tiny_eval.GetTotalDataSent() - setup_data_sent;
 
@@ -255,8 +255,8 @@ int main(int argc, const char* argv[]) {
   auto offline_end = GET_TIME();
 
 //Sync with Constructor
-  tiny_eval.chan->send(&snd, 1);
-  tiny_eval.chan->recv(&rcv, 1);
+  tiny_eval.chan.send(&snd, 1);
+  tiny_eval.chan.recv(&rcv, 1);
 
   uint64_t offline_data_sent = tiny_eval.GetTotalDataSent() - setup_data_sent - preprocess_data_sent;
 
@@ -275,8 +275,8 @@ int main(int argc, const char* argv[]) {
   auto online_end = GET_TIME();
 
 //Sync with Constructor
-  tiny_eval.chan->send(&snd, 1);
-  tiny_eval.chan->recv(&rcv, 1);
+  tiny_eval.chan.send(&snd, 1);
+  tiny_eval.chan.recv(&rcv, 1);
 
   uint64_t online_data_sent = tiny_eval.GetTotalDataSent() - setup_data_sent - preprocess_data_sent - offline_data_sent;
 

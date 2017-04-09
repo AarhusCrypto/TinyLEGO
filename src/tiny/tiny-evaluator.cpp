@@ -29,10 +29,10 @@ TinyEvaluator::TinyEvaluator(uint8_t seed[], Params& params) :
 
 TinyEvaluator::~TinyEvaluator() {
 
-  chan->close();
+  chan.close();
 
   for (int e = 0; e < exec_channels.size(); ++e) {
-    exec_channels[e]->close();
+    exec_channels[e].close();
   }
 
   end_point.stop();
@@ -40,12 +40,12 @@ TinyEvaluator::~TinyEvaluator() {
 
 void TinyEvaluator::Connect(std::string ip_address, uint16_t port) {
 
-  end_point.start(ios, ip_address, port, false, "ep");
+  end_point.start(ios, ip_address, port, osuCrypto::EpMode::Client, "ep");
 
-  chan = &end_point.addChannel("chan", "chan");
+  chan = end_point.addChannel("chan", "chan");
 
   for (int e = 0; e < commit_receivers.size(); ++e) {
-    exec_channels.emplace_back(&end_point.addChannel("exec_channel_" + std::to_string(e), "exec_channel_" + std::to_string(e)));
+    exec_channels.emplace_back(end_point.addChannel("exec_channel_" + std::to_string(e), "exec_channel_" + std::to_string(e)));
   }
 }
 
@@ -57,7 +57,7 @@ void TinyEvaluator::Setup() {
 
   osuCrypto::NaorPinkas baseOTs;
 
-  baseOTs.send(base_ots, rnd, *chan, 1);
+  baseOTs.send(base_ots, rnd, chan, 1);
 
   //Extended the base ots and set them for each dot_receiver
   osuCrypto::KosDotExtReceiver temp_dot_reciever;
@@ -79,7 +79,7 @@ void TinyEvaluator::Setup() {
   //Run kos OTX and store the resulting NUM_COMMIT_SEED_OT OTs appropriately
   commit_seed_choices.randomize(rnd);
 
-  kos_receiver.receive(commit_seed_choices, commit_seed_OTs, rnd, *chan);
+  kos_receiver.receive(commit_seed_choices, commit_seed_OTs, rnd, chan);
 
   //Setup tmp commit_receiver
   SplitCommitReceiver tmp_receiver;
@@ -165,7 +165,7 @@ void TinyEvaluator::Preprocess() {
       osuCrypto::BitVector dot_choices(num_ots);
       dot_choices.randomize(exec_rnds[exec_id]);
 
-      dot_receivers[exec_id]->receive(dot_choices, msgs, exec_rnds[exec_id], *exec_channels[exec_id]);
+      dot_receivers[exec_id]->receive(dot_choices, msgs, exec_rnds[exec_id], exec_channels[exec_id]);
 
       for (int i = 0; i < num_ots; ++i) {
         _mm_storeu_si128((__m128i*) input_masks[i], msgs[i]);
@@ -173,24 +173,24 @@ void TinyEvaluator::Preprocess() {
 
       commit_shares[exec_id] = BYTEArrayVector(num_commits, CODEWORD_BYTES);
 
-      if (!commit_receivers[exec_id].Commit(commit_shares[exec_id], exec_rnds[exec_id], *exec_channels[exec_id])) {
+      if (!commit_receivers[exec_id].Commit(commit_shares[exec_id], exec_rnds[exec_id], exec_channels[exec_id])) {
         std::cout << "Abort, key commit failed!" << std::endl;
         throw std::runtime_error("Abort, key commit failed!");
       }
 
       //Run chosen commit
       BYTEArrayVector input_mask_corrections(num_ots, CSEC_BYTES);
-      exec_channels[exec_id]->recv(input_mask_corrections.data(), input_mask_corrections.size());
+      exec_channels[exec_id].recv(input_mask_corrections.data(), input_mask_corrections.size());
 
 
       BYTEArrayVector commit_shares_lsb_blind(SSEC, CODEWORD_BYTES);
-      if (!commit_receivers[exec_id].Commit(commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
+      if (!commit_receivers[exec_id].Commit(commit_shares_lsb_blind, exec_rnds[exec_id], exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
         std::cout << "Abort, blind commit failed!" << std::endl;
         throw std::runtime_error("Abort, blind commit failed!");
       }
 
       osuCrypto::BitVector decommit_lsb(num_ots);
-      exec_channels[exec_id]->recv(decommit_lsb);
+      exec_channels[exec_id].recv(decommit_lsb.data(), decommit_lsb.sizeBytes());
 
 
       BYTEArrayVector commit_shares_ot(num_ots, CODEWORD_BYTES);
@@ -199,7 +199,7 @@ void TinyEvaluator::Preprocess() {
       }
 
 
-      if (!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_ot, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id])) {
+      if (!commit_receivers[exec_id].BatchDecommitLSB(commit_shares_ot, decommit_lsb, commit_shares_lsb_blind, exec_rnds[exec_id], exec_channels[exec_id])) {
         std::cout << "Abort, blind lsb decommit failed!" << std::endl;
         throw std::runtime_error("Abort, blind lsb decommit failed!");
       }
@@ -210,7 +210,7 @@ void TinyEvaluator::Preprocess() {
 
       if (exec_id == 0) {
         uint8_t correction_commit_delta[CODEWORD_BYTES + 1];
-        exec_channels[exec_id]->recv(correction_commit_delta, CODEWORD_BYTES + 1);
+        exec_channels[exec_id].recv(correction_commit_delta, CODEWORD_BYTES + 1);
 
         for (int i = 0; i < CODEWORD_BYTES; ++i) {
           commit_shares[exec_id][thread_params_vec[exec_id].delta_pos][i] ^= (correction_commit_delta[i] & commit_seed_choices.data()[i]);
@@ -263,8 +263,8 @@ void TinyEvaluator::Preprocess() {
           ot_delta_cnc_choices[i] = dot_choices[thread_params_vec[exec_id].num_pre_inputs + i];
         }
 
-        exec_channels[exec_id]->send(cnc_ot_values);
-        exec_channels[exec_id]->send(ot_delta_cnc_choices);
+        exec_channels[exec_id].send(cnc_ot_values.data(), cnc_ot_values.size());
+        exec_channels[exec_id].send(ot_delta_cnc_choices.data(), ot_delta_cnc_choices.sizeBytes());
 
         //Compute decommit shares
         BYTEArrayVector chosen_decommit_shares(SSEC, CODEWORD_BYTES);
@@ -279,7 +279,7 @@ void TinyEvaluator::Preprocess() {
 
         //Receive decommits
         BYTEArrayVector decomitted_values(SSEC, CSEC_BYTES);
-        if (!commit_receivers[exec_id].Decommit(chosen_decommit_shares, decomitted_values, *exec_channels[exec_id])) {
+        if (!commit_receivers[exec_id].Decommit(chosen_decommit_shares, decomitted_values, exec_channels[exec_id])) {
           thread_ver_successes[exec_id] = false;
           std::cout << "Sender decommit fail in OT CNC!" << std::endl;
           throw std::runtime_error("Sender decommit fail in OT CNC!");
@@ -309,7 +309,7 @@ void TinyEvaluator::Preprocess() {
 
       BYTEArrayVector exec_commit_shares_out_lsb_blind(thread_params_vec[exec_id].num_pre_outputs, CODEWORD_BYTES);
 
-      if (!commit_receivers[exec_id].Commit(exec_commit_shares_out_lsb_blind, exec_rnds[exec_id], *exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
+      if (!commit_receivers[exec_id].Commit(exec_commit_shares_out_lsb_blind, exec_rnds[exec_id], exec_channels[exec_id], std::numeric_limits<uint32_t>::max(), ALL_RND_LSB_ZERO)) {
         std::cout << "out_lsb_blind commit failed" << std::endl;
         throw std::runtime_error("out_lsb_blind commit failed");
       }
@@ -328,9 +328,9 @@ void TinyEvaluator::Preprocess() {
 
       //Receive all garbling data. When received we send the CNC challenge seed
       std::vector<uint8_t> raw_garbling_data(3 * thread_params_vec[exec_id].Q * CSEC_BYTES + 2 * thread_params_vec[exec_id].A * CSEC_BYTES);
-      exec_channels[exec_id]->recv(raw_garbling_data.data(), raw_garbling_data.size());
+      exec_channels[exec_id].recv(raw_garbling_data.data(), raw_garbling_data.size());
 
-      exec_channels[exec_id]->asyncSendCopy(cnc_seed, CSEC_BYTES);
+      exec_channels[exec_id].asyncSendCopy(cnc_seed, CSEC_BYTES);
 
       //Assign pointers to the garbling data. Doing this relatively for clarity
       HalfGates gates_data;
@@ -467,7 +467,7 @@ void TinyEvaluator::Preprocess() {
       int num_check_keys_sent = 2 * num_check_gates + num_check_auths;
       BYTEArrayVector all_cnc_keys(num_checks, CSEC_BYTES);
 
-      exec_channels[exec_id]->recv(all_cnc_keys.data(), num_check_keys_sent * CSEC_BYTES);
+      exec_channels[exec_id].recv(all_cnc_keys.data(), num_check_keys_sent * CSEC_BYTES);
 
       GarblingHandler gh(thread_params_vec[exec_id]);
       gh.OutputShiftEvaluateGates(gates_data, 0, all_cnc_keys[num_check_auths], all_cnc_keys[num_check_auths + num_check_gates],
@@ -481,7 +481,7 @@ void TinyEvaluator::Preprocess() {
       }
 
       //Start decommit phase using the above-created indices
-      if (!commit_receivers[exec_id].BatchDecommit(cnc_computed_shares, all_cnc_keys, exec_rnds[exec_id], *exec_channels[exec_id], true)) {
+      if (!commit_receivers[exec_id].BatchDecommit(cnc_computed_shares, all_cnc_keys, exec_rnds[exec_id], exec_channels[exec_id], true)) {
         std::cout << exec_id << std::endl;
         std::cout << "Wrong keys sent!" << std::endl;
         thread_ver_successes[exec_id] = false;
@@ -495,7 +495,7 @@ void TinyEvaluator::Preprocess() {
   }
 
   //Send the bucketing info
-  chan->send(bucket_seed, CSEC_BYTES);
+  chan.send(bucket_seed, CSEC_BYTES);
 
 //Setup maps from eval_gates and eval_auths to commit_block and inner block commit index. Needed to construct decommits that span all executions
   IDMap eval_gates_to_blocks(eval_gates_ids, thread_params_vec[0].Q + thread_params_vec[0].A, thread_params_vec[0].out_keys_start);
@@ -524,7 +524,7 @@ void TinyEvaluator::Preprocess() {
 
       //Receive all preprocessed soldering data and point into this for convenience
       BYTEArrayVector decommited_pre_solderings(num_pre_solderings, CSEC_BYTES);
-      exec_channels[exec_id]->recv(decommited_pre_solderings.data(), decommited_pre_solderings.size());
+      exec_channels[exec_id].recv(decommited_pre_solderings.data(), decommited_pre_solderings.size());
 
       // Apply the actual solderings and store the indices
       int curr_head_gate_pos, curr_head_block, curr_head_idx, curr_gate_pos, curr_gate_block, curr_gate_idx, curr_auth_pos, curr_auth_block, curr_auth_idx, curr_head_inp_auth_pos, curr_head_inp_auth_block, curr_head_inp_auth_idx, curr_inp_auth_pos;
@@ -639,7 +639,7 @@ void TinyEvaluator::Preprocess() {
       }
 
       //We end by sending the produced solderings and starting the batch decommit procedure which uses commitments from all executions to build the decommits
-      if (!commit_receivers[exec_id].BatchDecommit(presolder_computed_shares, decommited_pre_solderings, exec_rnds[exec_id], *exec_channels[exec_id], true)) {
+      if (!commit_receivers[exec_id].BatchDecommit(presolder_computed_shares, decommited_pre_solderings, exec_rnds[exec_id], exec_channels[exec_id], true)) {
         thread_ver_successes[exec_id] = false;
         std::cout << "Preprocessed soldering decommit failed" << std::endl;
       }
@@ -785,9 +785,9 @@ void TinyEvaluator::Offline(std::vector<Circuit*>& circuits, int top_num_execs) 
 
         BYTEArrayVector topological_solderings(num_top_solderings, CSEC_BYTES);
 
-        exec_channels[exec_id]->recv(topological_solderings.data(), topological_solderings.size());
+        exec_channels[exec_id].recv(topological_solderings.data(), topological_solderings.size());
 
-        if (!commit_receivers[exec_id].BatchDecommit(topsolder_computed_shares, topological_solderings, exec_rnds[exec_id], *exec_channels[exec_id], true)) {
+        if (!commit_receivers[exec_id].BatchDecommit(topsolder_computed_shares, topological_solderings, exec_rnds[exec_id], exec_channels[exec_id], true)) {
           thread_ver_successes[exec_id] = false;
           std::cout << "Topological soldering decommit failed" << std::endl;
         }
@@ -875,7 +875,7 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<osuCrypt
         }
 
         if (circuit->num_eval_inp_wires != 0) {
-          exec_channels[exec_id]->asyncSendCopy(e);
+          exec_channels[exec_id].asyncSendCopy(e);
         }
 
         __m128i* intrin_values = new __m128i[circuit->num_wires]; //using raw pointer due to ~25% increase in overall performance. Since the online phase is so computationally efficient even the slightest performance hit is immediately seen. It does not matter in the others phases as they operation on a very different running time scale.
@@ -898,11 +898,11 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<osuCrypt
         }
 
         if (circuit->num_const_inp_wires != 0) {
-          exec_channels[exec_id]->recv(const_inp_keys.data(), const_inp_keys.size());
+          exec_channels[exec_id].recv(const_inp_keys.data(), const_inp_keys.size());
         }
 
         if (circuit->num_eval_inp_wires != 0) {
-          if (!commit_receivers[exec_id].Decommit(eval_computed_shares_inp, eval_inp_keys, *exec_channels[exec_id])) {
+          if (!commit_receivers[exec_id].Decommit(eval_computed_shares_inp, eval_inp_keys, exec_channels[exec_id])) {
             std::cout << "Abort: Inp Decommit fail! " << std::endl;
             throw std::runtime_error("Abort: Inp Decommit fail!");
           }
@@ -1041,7 +1041,7 @@ void TinyEvaluator::Online(std::vector<Circuit*>& circuits, std::vector<osuCrypt
         }
 
         BYTEArrayVector decommit_lsb(circuit->num_out_wires, CSEC_BYTES);
-        commit_receivers[exec_id].Decommit(decommit_shares_out, decommit_lsb, *exec_channels[exec_id]);
+        commit_receivers[exec_id].Decommit(decommit_shares_out, decommit_lsb, exec_channels[exec_id]);
 
         for (int i = 0; i < circuit->num_out_wires; ++i) {
           curr_output = (out_offset + i);

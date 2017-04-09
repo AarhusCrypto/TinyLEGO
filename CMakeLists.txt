@@ -1,17 +1,17 @@
 cmake_minimum_required (VERSION 2.8.3)
 project (TINY CXX)
 
-#Use -DCMAKE_BUILD_TYPE=RELEASE to invoke
-IF(${CMAKE_BUILD_TYPE} MATCHES "RELEASE")
+#Use -DCMAKE_BUILD_TYPE=Release to invoke
+IF(${CMAKE_BUILD_TYPE} MATCHES "Release")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/build/release/")
 set(CMAKE_VERBOSE_MAKEFILE FALSE)
 
 #Defaults to debug mode
-ELSE(${CMAKE_BUILD_TYPE} MATCHES "RELEASE")
+ELSE(${CMAKE_BUILD_TYPE} MATCHES "Release")
 set(${CMAKE_BUILD_TYPE} "DEBUG")
 set(CMAKE_VERBOSE_MAKEFILE TRUE)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/build/debug/")
-ENDIF(${CMAKE_BUILD_TYPE} MATCHES "RELEASE")
+ENDIF(${CMAKE_BUILD_TYPE} MATCHES "Release")
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/build/obj/")
 
@@ -33,10 +33,9 @@ add_subdirectory(libs/SplitCommit)
 
 #Include headers
 include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/libOTe)
+include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/libOTe/cryptoTools)
 include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/src)
 include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs)
-include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/libOTe/thirdparty/linux/boost)
-include_directories(${CMAKE_CURRENT_LIST_DIR}/libs/SplitCommit/libs/libOTe/thirdparty/win/boost)
 
 include_directories(${CMAKE_CURRENT_LIST_DIR}/libs)
 include_directories(${CMAKE_CURRENT_LIST_DIR}/src)

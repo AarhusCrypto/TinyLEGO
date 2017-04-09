@@ -44,10 +44,10 @@ void Tiny::WeightedRandomString(uint8_t res[], int weight, int res_length, osuCr
 }
 
 uint64_t Tiny::GetTotalDataSent() {
-  uint64_t res = chan->getTotalDataSent();
+  uint64_t res = chan.getTotalDataSent();
 
   for (int i = 0; i < exec_channels.size(); ++i) {
-    res += exec_channels[i]->getTotalDataSent();
+    res += exec_channels[i].getTotalDataSent();
   }
 
   return res;
