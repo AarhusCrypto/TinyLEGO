@@ -69,7 +69,7 @@ void TinyConstructor::Setup() {
   kos_sender.send(commit_seed_OTs, rnd, chan);
 
   SplitCommitSender tmp_sender;
-  tmp_sender.SetMsgBitSize(CSEC, gen_matrix_path);
+  tmp_sender.SetMsgBitSize(CSEC);
 
   std::vector<std::array<osuCrypto::block, 2>> string_msgs(CODEWORD_BITS);
 
