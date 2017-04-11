@@ -5,7 +5,6 @@ TinyConstructor::TinyConstructor(uint8_t seed[], Params& params) :
   eval_gates_ids(params.num_eval_gates),
   eval_auths_ids(params.num_eval_auths),
   commit_seed_OTs(CODEWORD_BITS),
-  commit_senders(params.num_max_execs),
   commit_shares(params.num_max_execs) {
   commit_shares_out_lsb_blind = {
     BYTEArrayVector(params.num_pre_outputs, CODEWORD_BYTES),
@@ -30,7 +29,7 @@ void TinyConstructor::Connect(std::string ip_address, uint16_t port) {
 
   chan = end_point.addChannel("chan", "chan");
 
-  for (int e = 0; e < commit_senders.size(); ++e) {
+  for (int e = 0; e < commit_shares.size(); ++e) {
     exec_channels.emplace_back(end_point.addChannel("exec_channel_" + std::to_string(e), "exec_channel_" + std::to_string(e)));
   }
 }
@@ -51,7 +50,7 @@ void TinyConstructor::Setup() {
   osuCrypto::KosDotExtSender temp_dot_sender;
   temp_dot_sender.setBaseOts(base_ots, base_ot_choices);
 
-  for (int exec_id = 0; exec_id < commit_senders.size(); ++exec_id) {
+  for (int exec_id = 0; exec_id < commit_shares.size(); ++exec_id) {
     dot_senders.emplace_back(temp_dot_sender.split());
   }
 
@@ -68,8 +67,7 @@ void TinyConstructor::Setup() {
   //Run kos OTX and store the resulting NUM_COMMIT_SEED_OT OTs appropriately
   kos_sender.send(commit_seed_OTs, rnd, chan);
 
-  SplitCommitSender tmp_sender;
-  tmp_sender.SetMsgBitSize(CSEC);
+  SplitCommitSender tmp_sender(CSEC);
 
   std::vector<std::array<osuCrypto::block, 2>> string_msgs(CODEWORD_BITS);
 
@@ -79,7 +77,7 @@ void TinyConstructor::Setup() {
   }
 
   tmp_sender.SetSeedOTs(string_msgs);
-  tmp_sender.GetCloneSenders(commit_senders.size(), commit_senders);
+  commit_senders = tmp_sender.GetCloneSenders(commit_shares.size());
 }
 
 void TinyConstructor::Preprocess() {

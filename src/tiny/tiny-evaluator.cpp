@@ -8,7 +8,6 @@ TinyEvaluator::TinyEvaluator(uint8_t seed[], Params& params) :
   eval_auths_ids(params.num_eval_auths),
   commit_seed_OTs(CODEWORD_BITS),
   commit_seed_choices(CODEWORD_BITS),
-  commit_receivers(params.num_max_execs),
   commit_shares(params.num_max_execs),
   global_dot_choices(params.num_pre_inputs),
   global_dot_lsb(params.num_pre_inputs),
@@ -44,7 +43,7 @@ void TinyEvaluator::Connect(std::string ip_address, uint16_t port) {
 
   chan = end_point.addChannel("chan", "chan");
 
-  for (int e = 0; e < commit_receivers.size(); ++e) {
+  for (int e = 0; e < commit_shares.size(); ++e) {
     exec_channels.emplace_back(end_point.addChannel("exec_channel_" + std::to_string(e), "exec_channel_" + std::to_string(e)));
   }
 }
@@ -63,7 +62,7 @@ void TinyEvaluator::Setup() {
   osuCrypto::KosDotExtReceiver temp_dot_reciever;
   temp_dot_reciever.setBaseOts(base_ots);
 
-  for (int exec_id = 0; exec_id < commit_receivers.size(); ++exec_id) {
+  for (int exec_id = 0; exec_id < commit_shares.size(); ++exec_id) {
     dot_receivers.emplace_back(temp_dot_reciever.split());
   }
 
@@ -82,8 +81,7 @@ void TinyEvaluator::Setup() {
   kos_receiver.receive(commit_seed_choices, commit_seed_OTs, rnd, chan);
 
   //Setup tmp commit_receiver
-  SplitCommitReceiver tmp_receiver;
-  tmp_receiver.SetMsgBitSize(CSEC);
+  SplitCommitReceiver tmp_receiver(CSEC);
 
   std::vector<osuCrypto::block> string_msgs(CODEWORD_BITS);
   osuCrypto::BitVector string_choices(CODEWORD_BITS);
@@ -94,7 +92,7 @@ void TinyEvaluator::Setup() {
   }
 
   tmp_receiver.SetSeedOTs(string_msgs, string_choices);
-  tmp_receiver.GetCloneReceivers(commit_receivers.size(), rnd, commit_receivers, exec_rnds);
+  commit_receivers = tmp_receiver.GetCloneReceivers(commit_shares.size(), rnd, exec_rnds);
 }
 
 void TinyEvaluator::Preprocess() {
