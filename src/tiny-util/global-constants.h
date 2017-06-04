@@ -22,7 +22,7 @@ static uint8_t global_aes_key[CSEC_BYTES] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae,
 #define TP_MUL_FACTOR 2
 
 //q, alpha, beta, p_a, p_g
-#define bucket_param_table_size 44
+#define bucket_param_table_size 45
 static int bucket_param_table[bucket_param_table_size][5] = {
   {96900000, 3, 3, 3, 3},
   {78150000, 3, 3, 2, 3},
@@ -68,6 +68,7 @@ static int bucket_param_table[bucket_param_table_size][5] = {
   {1500, 6, 7, 2, 2},
   {1000, 7, 8, 3, 2},
   {500, 8, 9, 3, 2}
+  {7, 40, 41, 1, 1}
 };
 
 #define bucket_param_table_online_size 12
